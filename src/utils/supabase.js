@@ -2,6 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 
 const CONFIG_STORAGE_KEY = 'dsk_dairy_supabase_config_v1';
 
+// Production Supabase instance for Dr. Sanjay Kumar Dairy
+const DEFAULT_PRODUCTION_URL = 'https://zgnlxwxongevnsvhhzzv.supabase.co';
+const DEFAULT_PRODUCTION_ANON_KEY = 'sb_publishable_XuZKt_HOdPssdKsV3UPL-g_GproNpjB';
+
 /**
  * Get Supabase configuration from environment variables or local overrides
  */
@@ -21,7 +25,7 @@ export function getSupabaseConfig() {
 
   // Fallback to local configuration saved via setup UI
   try {
-    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONFIG_STORAGE_KEY) : null;
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed?.url && parsed?.anonKey) {
@@ -34,6 +38,15 @@ export function getSupabaseConfig() {
     }
   } catch (e) {
     console.error("Error reading local Supabase config:", e);
+  }
+
+  // Automatic connection to Dr. Sanjay Kumar Dairy Supabase instance in browser runtime
+  if (typeof window !== 'undefined' && DEFAULT_PRODUCTION_URL && DEFAULT_PRODUCTION_ANON_KEY) {
+    return {
+      url: DEFAULT_PRODUCTION_URL,
+      anonKey: DEFAULT_PRODUCTION_ANON_KEY,
+      source: 'default'
+    };
   }
 
   return {
