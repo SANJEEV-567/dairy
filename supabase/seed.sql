@@ -1,0 +1,2 @@
+-- Seed data for Dr. Sanjay Kumar Dairy
+-- Add any initial seed queries here if desired
