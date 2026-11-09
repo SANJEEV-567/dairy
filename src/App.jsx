@@ -13,6 +13,8 @@ import AdjustmentModal from './components/AdjustmentModal';
 import DeliveryModal from './components/DeliveryModal';
 import ConfirmModal from './components/ConfirmModal';
 import Toast from './components/Toast';
+import AuthView from './components/AuthView';
+import CustomerPortalView from './components/CustomerPortalView';
 
 import { 
   loadFromStorage, 
@@ -21,9 +23,13 @@ import {
 } from './utils/storage';
 import { STORAGE_KEYS } from './utils/constants';
 import { getCustomerBalance } from './utils/calculations';
-import { roundToTwo } from './utils/formatters';
+import { roundToTwo, getTodayKolkata } from './utils/formatters';
+import { getCurrentUser, logout as authLogout } from './utils/auth';
 
 export default function App() {
+  // Current Authenticated User (Seller or Customer)
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
   // Navigation active tab: 'dashboard' | 'daily-entry' | 'customers' | 'ledger' | 'billing' | 'payments' | 'backup'
   const [activeTab, setActiveTab] = useState('dashboard');
 
@@ -156,14 +162,17 @@ export default function App() {
 
         // If an opening balance was entered, record it as an initial balance adjustment
         if (customerData.openingBalance && customerData.openingBalance > 0) {
+          const isCredit = customerData.openingBalanceType === 'credit';
           const adj = {
             id: generateId('adj'),
             customerId: newId,
-            type: 'debit',
+            type: isCredit ? 'credit' : 'debit',
             amount: customerData.openingBalance,
-            date: new Date().toISOString().split('T')[0],
+            date: getTodayKolkata(),
             time: '00:00',
-            reason: 'Opening Balance (Initial setup)'
+            reason: isCredit
+              ? 'Opening Advance Credit (Initial setup)'
+              : 'Opening Balance Due (Initial setup)'
           };
           setAdjustments(prev => [...prev, adj]);
         }
@@ -473,10 +482,69 @@ export default function App() {
     setAdjustmentModalOpen(true);
   };
 
-  // Calculate total outstanding balance across active customers
+  // Calculate total outstanding balance across all customers (all receivables due)
   const totalDueAcrossActiveCustomers = customers
-    .filter(c => c.status !== 'inactive')
     .reduce((sum, c) => sum + getCustomerBalance(c.id, deliveries, payments, adjustments), 0);
+
+  const handleLogout = () => {
+    authLogout();
+    setCurrentUser(null);
+    showToast("Signed out successfully.");
+  };
+
+  // If user is not authenticated, display login & registration page
+  if (!currentUser) {
+    return (
+      <>
+        <Toast toast={toast} onClose={() => setToast(null)} />
+        <AuthView 
+          onAuthSuccess={(user) => {
+            setCurrentUser(user);
+            setActiveTab('dashboard');
+          }} 
+          showToast={showToast} 
+        />
+      </>
+    );
+  }
+
+  // If user is a Customer, display Customer Portal
+  if (currentUser.role === 'customer') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <Toast toast={toast} onClose={() => setToast(null)} />
+        <Navbar
+          activeTab="customer-portal"
+          setActiveTab={() => {}}
+          totalDue={0}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <CustomerPortalView
+            currentUser={currentUser}
+            customers={customers}
+            deliveries={deliveries}
+            payments={payments}
+            adjustments={adjustments}
+            statusOverrides={statusOverrides}
+            onCustomerPaymentSubmit={handleSavePayment}
+            showToast={showToast}
+          />
+        </main>
+        <footer className="bg-white border-t border-slate-200/80 py-6 text-center text-xs text-slate-500 no-print mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p className="font-semibold text-slate-700">
+              Dr. Sanjay Kumar Dairy — Customer Account Portal
+            </p>
+            <p className="text-slate-400">
+              Direct Daily Milk & Billing Records • Asia/Kolkata
+            </p>
+          </div>
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -561,6 +629,8 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         totalDue={totalDueAcrossActiveCustomers}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       {/* Main Page Content Body */}

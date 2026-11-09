@@ -1,10 +1,20 @@
+// In-memory localStorage polyfill for Node.js test environment
+const memStore = {};
+globalThis.localStorage = {
+  getItem: (k) => memStore[k] || null,
+  setItem: (k, v) => { memStore[k] = String(v); },
+  removeItem: (k) => { delete memStore[k]; },
+  clear: () => { Object.keys(memStore).forEach(k => delete memStore[k]); }
+};
+
 import assert from 'node:assert';
 import { 
   roundToTwo, 
   formatINR, 
   formatKg, 
   getTodayKolkata, 
-  formatMonthYear 
+  formatMonthYear,
+  addDays 
 } from './src/utils/formatters.js';
 import { 
   calculateCustomerLedger, 
@@ -13,6 +23,13 @@ import {
   getDailyDashboardMetrics 
 } from './src/utils/calculations.js';
 import { BILL_STATUS } from './src/utils/constants.js';
+import { 
+  loginWithEmail, 
+  registerAccount, 
+  loginWithGoogleAuth, 
+  logout, 
+  getCurrentUser 
+} from './src/utils/auth.js';
 
 console.log("Starting verification test suite for Dr. Sanjay Kumar Dairy...");
 
@@ -67,7 +84,8 @@ const customerObj = {
   phone: "9876543210",
   address: "Test Address",
   usualQuantityKg: 1.5,
-  usualPricePerKg: 60
+  usualPricePerKg: 60,
+  status: "active"
 };
 
 const bill = generateMonthlyBill(customerObj, "2026-11", deliveries, payments, adjustments, []);
@@ -107,4 +125,55 @@ assert.strictEqual(dashboard.totalMilkDeliveredTodayKg, 1.5, "Nov 1 milk deliver
 assert.strictEqual(dashboard.totalChargesToday, 90, "Nov 1 charges must be ₹90");
 assert.strictEqual(dashboard.paymentsReceivedToday, 0, "Nov 1 payments must be ₹0");
 
-console.log("All calculation and business workflow tests passed successfully!");
+// Test 10: addDays date navigation helper
+assert.strictEqual(addDays("2026-11-09", -1), "2026-11-08", "Nov 9 - 1 day must be Nov 8");
+assert.strictEqual(addDays("2026-11-09", 1), "2026-11-10", "Nov 9 + 1 day must be Nov 10");
+assert.strictEqual(addDays("2026-12-31", 1), "2027-01-01", "Dec 31 + 1 day must cross year to Jan 1");
+assert.strictEqual(addDays("2026-03-01", -1), "2026-02-28", "Mar 1 - 1 day in non-leap year must be Feb 28");
+
+// Test 11: Advance payment credit status resolution
+const advanceCust = { id: "cust_adv", name: "Advance Customer", usualQuantityKg: 1, usualPricePerKg: 50 };
+const advDeliveries = [{ id: "ad1", customerId: "cust_adv", date: "2026-11-05", time: "06:00", quantityKg: 2, pricePerKg: 50, charge: 100 }];
+const advAdjustments = [{ id: "aa1", customerId: "cust_adv", date: "2026-10-31", time: "00:00", type: "credit", amount: 40, reason: "October Advance Credit" }];
+const advBill = generateMonthlyBill(advanceCust, "2026-11", advDeliveries, [], advAdjustments, []);
+assert.strictEqual(advBill.previousOutstandingBalance, -40, "Previous advance credit must be -40");
+assert.strictEqual(advBill.finalAmountDue, 60, "Final amount due must be 100 - 40 = 60");
+assert.strictEqual(advBill.status, BILL_STATUS.PARTIALLY_PAID, "Must be Partially Paid because advance covered part of month charges");
+
+// Test 12: Inactive customer with balance still included in total receivables
+const inactiveCust = { id: "cust_inact", name: "Inactive Customer", status: "inactive" };
+const inactDeliveries = [{ id: "id1", customerId: "cust_inact", date: "2026-11-01", quantityKg: 5, pricePerKg: 60, charge: 300 }];
+const inactDashboard = getDailyDashboardMetrics("2026-11-01", [customerObj, inactiveCust], [...deliveries, ...inactDeliveries], payments, adjustments);
+assert.strictEqual(inactDashboard.totalOutstandingDue, 250 + 300, "Total outstanding due must include inactive customer with balance");
+
+// Test 13: Seller Email Authentication
+const sellerLogin = loginWithEmail('drsanjay@dairy.com', 'dairy123', 'seller');
+assert.strictEqual(sellerLogin.success, true, "Seller login with default credentials must succeed");
+assert.strictEqual(sellerLogin.user.role, 'seller', "Seller role must be 'seller'");
+
+// Test 14: Customer Registration & Login
+const custReg = registerAccount({
+  name: 'Suresh Kumar',
+  email: 'suresh@test.com',
+  password: 'password123',
+  role: 'customer',
+  phone: '9876500000',
+  usualQuantityKg: 2.0
+});
+assert.strictEqual(custReg.success, true, "Customer registration must succeed");
+assert.strictEqual(custReg.user.role, 'customer', "Role must be 'customer'");
+
+// Test 15: Google Sign-In for Customer
+const googleLogin = loginWithGoogleAuth({
+  name: 'Google User',
+  email: 'googleuser@gmail.com',
+  picture: 'https://example.com/pic.jpg'
+}, 'customer');
+assert.strictEqual(googleLogin.success, true, "Google login for customer must succeed");
+assert.strictEqual(googleLogin.user.provider, 'google', "Provider must be google");
+
+// Test 16: Logout
+logout();
+assert.strictEqual(getCurrentUser(), null, "Current user must be null after logout");
+
+console.log("All 16 calculation, business workflow, and authentication tests passed cleanly!");

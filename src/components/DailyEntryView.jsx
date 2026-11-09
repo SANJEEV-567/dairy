@@ -20,7 +20,8 @@ import {
   formatDateIndian, 
   formatINR, 
   formatKg, 
-  roundToTwo 
+  roundToTwo,
+  addDays 
 } from '../utils/formatters';
 import { getCustomerBalance } from '../utils/calculations';
 
@@ -79,18 +80,14 @@ export default function DailyEntryView({
     });
 
     setDrafts(newDrafts);
-  }, [selectedDate, customers.length, deliveries.length]);
+  }, [selectedDate, customers, deliveries]);
 
   const handlePrevDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() - 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(prev => addDays(prev, -1));
   };
 
   const handleNextDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(prev => addDays(prev, 1));
   };
 
   const handleDraftChange = (customerId, field, value) => {

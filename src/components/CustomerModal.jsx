@@ -16,6 +16,7 @@ export default function CustomerModal({
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('active');
   const [openingBalance, setOpeningBalance] = useState('0');
+  const [openingBalanceType, setOpeningBalanceType] = useState('debit');
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -83,7 +84,8 @@ export default function CustomerModal({
       usualPricePerKg: roundToTwo(parseFloat(usualPricePerKg)),
       notes: notes.trim(),
       status: status,
-      openingBalance: !customerToEdit ? roundToTwo(parseFloat(openingBalance) || 0) : 0
+      openingBalance: !customerToEdit ? roundToTwo(parseFloat(openingBalance) || 0) : 0,
+      openingBalanceType: !customerToEdit ? openingBalanceType : 'debit'
     };
 
     onSave(customerData);
@@ -236,23 +238,34 @@ export default function CustomerModal({
 
           {/* Opening Balance (Only shown when adding new customer) */}
           {!customerToEdit && (
-            <div>
-              <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
-                Previous Outstanding Balance (Optional)
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <label className="block text-xs font-bold uppercase text-slate-700">
+                Opening Balance (Optional)
               </label>
-              <div className="relative">
-                <IndianRupee className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="number"
-                  step="1"
-                  placeholder="0.00"
-                  value={openingBalance}
-                  onChange={(e) => setOpeningBalance(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-sm font-mono-numbers rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:border-emerald-500"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="sm:col-span-2 relative">
+                  <IndianRupee className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder="0.00"
+                    value={openingBalance}
+                    onChange={(e) => setOpeningBalance(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-sm font-mono-numbers rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:border-emerald-500"
+                  />
+                </div>
+                <select
+                  value={openingBalanceType}
+                  onChange={(e) => setOpeningBalanceType(e.target.value)}
+                  className="px-2 py-2 text-xs font-bold rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                >
+                  <option value="debit">Due (Customer Owes)</option>
+                  <option value="credit">Advance (Credit)</option>
+                </select>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
-                If this customer already owes you money before using this system, enter it here.
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                If the customer already has a running balance prior to starting this system, enter it here.
               </p>
             </div>
           )}

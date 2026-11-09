@@ -49,6 +49,7 @@ export default function CustomerLedgerView({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'delivery', 'payment', 'adjustment'
+  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' = oldest first, 'desc' = newest first
 
   // Calculate ledger for this customer
   const ledgerOptions = {
@@ -72,6 +73,10 @@ export default function CustomerLedgerView({
     if (typeFilter === 'all') return true;
     return t.type === typeFilter;
   });
+
+  const sortedDisplayTransactions = sortOrder === 'desc'
+    ? [...displayTransactions].reverse()
+    : displayTransactions;
 
   // Period totals
   const periodTotalDeliveriesKg = displayTransactions
@@ -320,16 +325,23 @@ export default function CustomerLedgerView({
 
           {/* Ledger Table */}
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Chronological Transaction History ({displayTransactions.length} records)
+                Transaction History ({displayTransactions.length} records)
               </span>
-              <span className="text-xs text-slate-400">
-                Sorted from oldest to newest with exact running balance
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Order:</span>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
+                >
+                  {sortOrder === 'asc' ? 'Oldest First (1 → 30)' : 'Newest First (30 → 1)'}
+                </button>
+              </div>
             </div>
 
-            {displayTransactions.length === 0 ? (
+            {sortedDisplayTransactions.length === 0 ? (
               <div className="py-12 text-center text-slate-500 text-sm">
                 No transactions recorded for this customer in the selected time period.
               </div>
@@ -347,7 +359,7 @@ export default function CustomerLedgerView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
-                    {displayTransactions.map((tx) => {
+                    {sortedDisplayTransactions.map((tx) => {
                       const isDebit = tx.effect === 'debit';
                       const isPayment = tx.type === 'payment';
                       const isDelivery = tx.type === 'delivery';

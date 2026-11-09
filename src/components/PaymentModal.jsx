@@ -62,8 +62,8 @@ export default function PaymentModal({
   const handleCustomerChange = (newCustId) => {
     setCustomerId(newCustId);
     const bal = getCustomerBalance(newCustId, deliveries, payments, adjustments);
-    if (!paymentToEdit && bal > 0) {
-      setAmount(bal.toString());
+    if (!paymentToEdit) {
+      setAmount(bal > 0 ? bal.toString() : '');
     }
   };
 

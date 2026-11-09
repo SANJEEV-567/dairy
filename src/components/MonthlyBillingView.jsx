@@ -54,7 +54,11 @@ export default function MonthlyBillingView({
   const [overrideStatus, setOverrideStatus] = useState(BILL_STATUS.PAID);
   const [overrideReason, setOverrideReason] = useState('');
 
-  const currentCustomer = customers.find(c => c.id === selectedCustomerId);
+  const effectiveCustomerId = selectedCustomerId && customers.some(c => c.id === selectedCustomerId)
+    ? selectedCustomerId
+    : customers[0]?.id || null;
+
+  const currentCustomer = customers.find(c => c.id === effectiveCustomerId);
 
   // Generate bill for currently selected customer
   const currentBill = currentCustomer
@@ -86,7 +90,12 @@ export default function MonthlyBillingView({
 
   const handleShareWhatsApp = (bill) => {
     if (!bill) return;
-    const phone = bill.customerPhone ? bill.customerPhone.replace(/\D/g, '') : '';
+    let cleanPhone = bill.customerPhone ? bill.customerPhone.replace(/\D/g, '') : '';
+    if (cleanPhone.length === 10) {
+      cleanPhone = `91${cleanPhone}`;
+    } else if (cleanPhone.startsWith('0') && cleanPhone.length === 11) {
+      cleanPhone = `91${cleanPhone.slice(1)}`;
+    }
     
     const message = 
 `*${DAIRY_NAME}*
@@ -106,7 +115,7 @@ Status: ${bill.status}
 Thank you for your business!`;
 
     const encoded = encodeURIComponent(message);
-    const url = phone ? `https://wa.me/91${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
     window.open(url, '_blank');
   };
 
@@ -306,7 +315,7 @@ Thank you for your business!`;
             <div className="flex items-center gap-3">
               <label className="text-xs font-bold text-slate-600 uppercase">Customer:</label>
               <select
-                value={selectedCustomerId || ''}
+                value={effectiveCustomerId || ''}
                 onChange={(e) => setSelectedCustomerId(e.target.value)}
                 className="px-3 py-2 text-sm font-bold rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >

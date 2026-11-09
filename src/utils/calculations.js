@@ -76,7 +76,14 @@ export function calculateCustomerLedger(
     if (a.date !== b.date) {
       return a.date.localeCompare(b.date);
     }
-    return (a.time || '').localeCompare(b.time || '');
+    const timeCompare = (a.time || '00:00').localeCompare(b.time || '00:00');
+    if (timeCompare !== 0) return timeCompare;
+    // Tie breaker: adjustments first (e.g. opening balances), then deliveries, then payments
+    const priority = { adjustment: 1, delivery: 2, payment: 3 };
+    const pA = priority[a.type] || 2;
+    const pB = priority[b.type] || 2;
+    if (pA !== pB) return pA - pB;
+    return (a.id || '').localeCompare(b.id || '');
   });
 
   // 3. Calculate running balance from the very beginning
@@ -246,7 +253,10 @@ export function generateMonthlyBill(
   let status = BILL_STATUS.DUE;
   if (finalAmountDue <= 0) {
     status = BILL_STATUS.PAID;
-  } else if (totalPaymentsInMonth > 0) {
+  } else if (
+    totalPaymentsInMonth > 0 || 
+    (previousOutstandingBalance < 0 && finalAmountDue < (totalMilkCharges + netAdjustmentsInMonth))
+  ) {
     status = BILL_STATUS.PARTIALLY_PAID;
   } else {
     status = BILL_STATUS.DUE;
@@ -304,13 +314,11 @@ export function getDailyDashboardMetrics(
     dayPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
   );
 
-  // Total amount currently due across all customers
+  // Total amount currently due across all customers (active or inactive with pending balance)
   let totalOutstandingDueAllCustomers = 0;
   const customerSummary = customers.map(cust => {
     const balance = getCustomerBalance(cust.id, deliveries, payments, adjustments);
-    if (cust.status !== 'inactive') {
-      totalOutstandingDueAllCustomers += balance;
-    }
+    totalOutstandingDueAllCustomers += balance;
 
     const deliveryForDay = dayDeliveries.find(d => d.customerId === cust.id);
 

@@ -16,7 +16,7 @@ import {
   Search,
   BookOpen
 } from 'lucide-react';
-import { formatINR, formatKg, formatDateIndian, getTodayKolkata, formatTimeIndian } from '../utils/formatters';
+import { formatINR, formatKg, formatDateIndian, getTodayKolkata, formatTimeIndian, addDays } from '../utils/formatters';
 import { getDailyDashboardMetrics } from '../utils/calculations';
 
 export default function DashboardView({
@@ -45,15 +45,11 @@ export default function DashboardView({
   const isToday = selectedDate === getTodayKolkata();
 
   const handlePrevDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() - 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(prev => addDays(prev, -1));
   };
 
   const handleNextDay = () => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + 1);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(prev => addDays(prev, 1));
   };
 
   const filteredCustomerSummary = metrics.customerSummary.filter(item => {

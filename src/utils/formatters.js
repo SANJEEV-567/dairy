@@ -157,6 +157,25 @@ export function getRecentMonthOptions(count = 12) {
 }
 
 /**
+ * Add or subtract days from a YYYY-MM-DD date string without UTC shifting
+ */
+export function addDays(dateStr, days) {
+  if (!dateStr) return getTodayKolkata();
+  const [yearStr, monthStr, dayStr] = dateStr.split('-');
+  const y = parseInt(yearStr, 10);
+  const m = parseInt(monthStr, 10);
+  const d = parseInt(dayStr, 10);
+  
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return getTodayKolkata();
+
+  const date = new Date(y, m - 1, d + days);
+  const newY = date.getFullYear();
+  const newM = String(date.getMonth() + 1).padStart(2, '0');
+  const newD = String(date.getDate()).padStart(2, '0');
+  return `${newY}-${newM}-${newD}`;
+}
+
+/**
  * Safe parse number with 2 decimal precision
  */
 export function roundToTwo(num) {
