@@ -34,6 +34,18 @@ import {
   signOutUser,
   linkCustomerAccountByCode
 } from './utils/authService';
+import { 
+  fetchSellerDataFromSupabase,
+  fetchCustomerDataFromSupabase,
+  syncCustomerToSupabase,
+  syncDeliveryToSupabase,
+  syncDeliveriesBatchToSupabase,
+  deleteDeliveryFromSupabase,
+  syncPaymentToSupabase,
+  deletePaymentFromSupabase,
+  syncAdjustmentToSupabase,
+  deleteAdjustmentFromSupabase
+} from './utils/dbSync';
 
 export default function App() {
   // Authentication State
@@ -128,7 +140,7 @@ export default function App() {
     let linked = getLinkedCustomerData(userId);
     const codeToTry = customCode || currentUser?.customerCode;
 
-    // If not linked yet, but customerCode exists, attempt auto-linking
+    // If not linked yet, but customerCode exists, attempt auto-linking locally
     if (!linked && codeToTry) {
       linkCustomerAccountLocally(codeToTry, userId);
       linked = getLinkedCustomerData(userId);
@@ -147,6 +159,16 @@ export default function App() {
       setAdjustments([]);
       setStatusOverrides([]);
     }
+
+    // Live remote sync from Supabase PostgreSQL
+    fetchCustomerDataFromSupabase(codeToTry, userId).then(remote => {
+      if (remote && remote.customer) {
+        setCustomers([remote.customer]);
+        setDeliveries(remote.deliveries || []);
+        setPayments(remote.payments || []);
+        setAdjustments(remote.adjustments || []);
+      }
+    }).catch(() => {});
   };
 
   // 2. Load and Sync Account-Scoped Records whenever currentUser changes
@@ -205,6 +227,22 @@ export default function App() {
     setPayments(scopedPay);
     setAdjustments(scopedAdj);
     setStatusOverrides(scopedOvr);
+
+    // Live remote sync from Supabase PostgreSQL for multi-device sync
+    fetchSellerDataFromSupabase(userId).then(remote => {
+      if (remote && remote.customers && remote.customers.length > 0) {
+        setCustomers(remote.customers);
+        setDeliveries(remote.deliveries);
+        setPayments(remote.payments);
+        setAdjustments(remote.adjustments);
+      } else if (withCodes.length > 0) {
+        // If Supabase has no records yet, seed local dairy records to Supabase
+        withCodes.forEach(c => syncCustomerToSupabase(c, userId));
+        scopedDeliv.forEach(d => syncDeliveryToSupabase(d, userId));
+        scopedPay.forEach(p => syncPaymentToSupabase(p, userId));
+        scopedAdj.forEach(a => syncAdjustmentToSupabase(a, userId));
+      }
+    }).catch(() => {});
   }, [currentUser?.id, currentUser?.role]);
 
   // Sync to account-scoped storage whenever seller state updates
@@ -307,6 +345,7 @@ export default function App() {
       const sellerPayKey = getScopedKey(STORAGE_KEYS.PAYMENTS, dairyId);
       const existingPay = loadFromStorage(sellerPayKey, []);
       saveToStorage(sellerPayKey, [newPayment, ...existingPay]);
+      syncPaymentToSupabase(newPayment, dairyId);
     }
   };
 
@@ -316,9 +355,10 @@ export default function App() {
   const handleSaveCustomer = (customerData) => {
     try {
       if (customerData.id) {
+        let updatedCustomer = null;
         setCustomers(prev => prev.map(c => {
           if (c.id === customerData.id) {
-            return {
+            updatedCustomer = {
               ...c,
               name: customerData.name,
               customerCode: customerData.customerCode || c.customerCode || generateCustomerCode(customers),
@@ -330,9 +370,11 @@ export default function App() {
               status: customerData.status,
               updatedAt: new Date().toISOString()
             };
+            return updatedCustomer;
           }
           return c;
         }));
+        if (updatedCustomer) syncCustomerToSupabase(updatedCustomer, currentUser?.id);
         showToast(`Customer "${customerData.name}" updated successfully.`);
       } else {
         const newId = generateId('cust');
@@ -352,6 +394,7 @@ export default function App() {
         };
 
         setCustomers(prev => [...prev, newCustomer]);
+        syncCustomerToSupabase(newCustomer, currentUser?.id);
 
         if (customerData.openingBalance && customerData.openingBalance > 0) {
           const isCredit = customerData.openingBalanceType === 'credit';
@@ -368,6 +411,7 @@ export default function App() {
               : 'Opening Balance Due (Initial setup)'
           };
           setAdjustments(prev => [...prev, adj]);
+          syncAdjustmentToSupabase(adj, currentUser?.id);
         }
 
         showToast(`Customer "${customerData.name}" added successfully.`);
@@ -388,16 +432,19 @@ export default function App() {
       confirmLabel: isActivating ? "Reactivate" : "Deactivate",
       isDanger: !isActivating,
       onConfirm: () => {
+        let updatedCustomer = null;
         setCustomers(prev => prev.map(c => {
           if (c.id === customer.id) {
-            return {
+            updatedCustomer = {
               ...c,
               status: isActivating ? 'active' : 'inactive',
               updatedAt: new Date().toISOString()
             };
+            return updatedCustomer;
           }
           return c;
         }));
+        if (updatedCustomer) syncCustomerToSupabase(updatedCustomer, currentUser?.id);
         showToast(`Customer "${customer.name}" ${isActivating ? 'reactivated' : 'deactivated'} successfully.`);
       }
     });
@@ -409,9 +456,10 @@ export default function App() {
   const handleSaveDelivery = (deliveryRecord) => {
     try {
       if (deliveryRecord.id) {
+        let updatedRecord = null;
         setDeliveries(prev => prev.map(d => {
           if (d.id === deliveryRecord.id) {
-            return {
+            updatedRecord = {
               ...d,
               date: deliveryRecord.date,
               time: deliveryRecord.time,
@@ -421,9 +469,11 @@ export default function App() {
               note: deliveryRecord.note,
               updatedAt: new Date().toISOString()
             };
+            return updatedRecord;
           }
           return d;
         }));
+        if (updatedRecord) syncDeliveryToSupabase(updatedRecord, currentUser?.id);
         showToast("Delivery record updated successfully.");
       } else {
         const existing = deliveries.find(
@@ -431,9 +481,10 @@ export default function App() {
         );
 
         if (existing) {
+          let updatedRecord = null;
           setDeliveries(prev => prev.map(d => {
             if (d.id === existing.id) {
-              return {
+              updatedRecord = {
                 ...d,
                 time: deliveryRecord.time,
                 quantityKg: deliveryRecord.quantityKg,
@@ -442,9 +493,11 @@ export default function App() {
                 note: deliveryRecord.note,
                 updatedAt: new Date().toISOString()
               };
+              return updatedRecord;
             }
             return d;
           }));
+          if (updatedRecord) syncDeliveryToSupabase(updatedRecord, currentUser?.id);
           showToast("Existing delivery updated successfully.");
         } else {
           const newDelivery = {
@@ -454,6 +507,7 @@ export default function App() {
             createdAt: new Date().toISOString()
           };
           setDeliveries(prev => [...prev, newDelivery]);
+          syncDeliveryToSupabase(newDelivery, currentUser?.id);
           showToast("Delivery recorded successfully.");
         }
       }
@@ -464,6 +518,7 @@ export default function App() {
 
   const handleBatchSaveDeliveries = (recordsToSave) => {
     try {
+      const savedBatch = [];
       setDeliveries(prev => {
         let updated = [...prev];
         recordsToSave.forEach(rec => {
@@ -471,7 +526,7 @@ export default function App() {
             d => d.customerId === rec.customerId && d.date === rec.date
           );
           if (existingIndex >= 0) {
-            updated[existingIndex] = {
+            const updatedRec = {
               ...updated[existingIndex],
               time: rec.time,
               quantityKg: rec.quantityKg,
@@ -480,17 +535,24 @@ export default function App() {
               note: rec.note,
               updatedAt: new Date().toISOString()
             };
+            updated[existingIndex] = updatedRec;
+            savedBatch.push(updatedRec);
           } else {
-            updated.push({
+            const newRec = {
               id: generateId('deliv'),
               dairy_id: currentUser?.id,
               ...rec,
               createdAt: new Date().toISOString()
-            });
+            };
+            updated.push(newRec);
+            savedBatch.push(newRec);
           }
         });
         return updated;
       });
+      if (savedBatch.length > 0) {
+        syncDeliveriesBatchToSupabase(savedBatch, currentUser?.id);
+      }
       showToast(`Saved ${recordsToSave.length} daily delivery entries successfully!`);
     } catch (err) {
       showToast("Failed to save daily entries: " + err.message, "error");
@@ -503,9 +565,10 @@ export default function App() {
   const handleSavePayment = (paymentRecord) => {
     try {
       if (paymentRecord.id) {
+        let updatedPayment = null;
         setPayments(prev => prev.map(p => {
           if (p.id === paymentRecord.id) {
-            return {
+            updatedPayment = {
               ...p,
               customerId: paymentRecord.customerId,
               amount: paymentRecord.amount,
@@ -515,9 +578,11 @@ export default function App() {
               note: paymentRecord.note,
               updatedAt: new Date().toISOString()
             };
+            return updatedPayment;
           }
           return p;
         }));
+        if (updatedPayment) syncPaymentToSupabase(updatedPayment, currentUser?.id);
         showToast("Payment record updated successfully.");
       } else {
         const newPayment = {
@@ -527,6 +592,7 @@ export default function App() {
           createdAt: new Date().toISOString()
         };
         setPayments(prev => [...prev, newPayment]);
+        syncPaymentToSupabase(newPayment, currentUser?.id);
         showToast(`Payment of ₹${paymentRecord.amount} recorded successfully.`);
       }
     } catch (err) {
@@ -540,9 +606,10 @@ export default function App() {
   const handleSaveAdjustment = (adjustmentRecord) => {
     try {
       if (adjustmentRecord.id) {
+        let updatedAdj = null;
         setAdjustments(prev => prev.map(a => {
           if (a.id === adjustmentRecord.id) {
-            return {
+            updatedAdj = {
               ...a,
               customerId: adjustmentRecord.customerId,
               type: adjustmentRecord.type,
@@ -552,9 +619,11 @@ export default function App() {
               reason: adjustmentRecord.reason,
               updatedAt: new Date().toISOString()
             };
+            return updatedAdj;
           }
           return a;
         }));
+        if (updatedAdj) syncAdjustmentToSupabase(updatedAdj, currentUser?.id);
         showToast("Adjustment updated successfully.");
       } else {
         const newAdj = {
@@ -564,6 +633,7 @@ export default function App() {
           createdAt: new Date().toISOString()
         };
         setAdjustments(prev => [...prev, newAdj]);
+        syncAdjustmentToSupabase(newAdj, currentUser?.id);
         showToast(`Balance adjustment of ₹${adjustmentRecord.amount} recorded.`);
       }
     } catch (err) {
@@ -627,12 +697,15 @@ export default function App() {
       onConfirm: () => {
         if (tx.type === 'delivery') {
           setDeliveries(prev => prev.filter(d => d.id !== tx.id));
+          deleteDeliveryFromSupabase(tx.id);
           showToast("Delivery record deleted.");
         } else if (tx.type === 'payment') {
           setPayments(prev => prev.filter(p => p.id !== tx.id));
+          deletePaymentFromSupabase(tx.id);
           showToast("Payment record deleted.");
         } else if (tx.type === 'adjustment') {
           setAdjustments(prev => prev.filter(a => a.id !== tx.id));
+          deleteAdjustmentFromSupabase(tx.id);
           showToast("Adjustment record deleted.");
         }
       }
