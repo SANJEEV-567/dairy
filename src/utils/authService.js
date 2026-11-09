@@ -11,7 +11,7 @@ function normalizeAuthError(error) {
     return "Incorrect email or password. Please check your credentials and try again.";
   }
   if (msg.toLowerCase().includes('email not confirmed')) {
-    return "Your email has not been verified yet. Please check your inbox for the confirmation link.";
+    return "Your email has not been verified yet. Check your inbox, or in your Supabase Dashboard under Authentication > Providers > Email, turn OFF 'Confirm email' for instant sign in.";
   }
   if (msg.toLowerCase().includes('user already registered')) {
     return "An account with this email address already exists. Please sign in instead.";
