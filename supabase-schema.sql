@@ -2,9 +2,11 @@
 -- DR. SANJAY KUMAR DAIRY - POSTGRESQL & ROW-LEVEL SECURITY (RLS) SCHEMA
 -- ====================================================================
 -- This script sets up database-level security and strict role-based row isolation.
--- Run this in the Supabase SQL Editor for your project.
+-- Safe to run repeatedly in the Supabase SQL Editor (100% idempotent).
 
+-- --------------------------------------------------------------------
 -- 1. Profiles Table (Linked to Supabase Auth Users)
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
@@ -15,22 +17,30 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure customer_code column exists if table was created in an earlier migration
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS customer_code TEXT;
+
 -- Enable RLS on profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they already exist before creating
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
 CREATE POLICY "Users can view their own profile"
   ON public.profiles FOR SELECT
   USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id);
 
+-- --------------------------------------------------------------------
 -- 2. Customers Table (Managed by Dairy Seller)
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.customers (
   id TEXT PRIMARY KEY,
   dairy_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  customer_code TEXT UNIQUE NOT NULL, -- Seller-issued unique code (e.g. DSK-1001)
+  customer_code TEXT UNIQUE, -- Seller-issued unique code (e.g. DSK-1001)
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL, -- Explicitly linked customer account
   name TEXT NOT NULL,
   phone TEXT,
@@ -44,22 +54,38 @@ CREATE TABLE IF NOT EXISTS public.customers (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure columns exist if table was created in earlier version
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS customer_code TEXT;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'customers_customer_code_key'
+  ) THEN
+    ALTER TABLE public.customers ADD CONSTRAINT customers_customer_code_key UNIQUE (customer_code);
+  END IF;
+END $$;
+
 -- Enable RLS on customers
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 
--- Sellers can only see and manage their own dairy customers
+-- Drop and recreate policies
+DROP POLICY IF EXISTS "Sellers can manage their dairy customers" ON public.customers;
 CREATE POLICY "Sellers can manage their dairy customers"
   ON public.customers FOR ALL
   USING (auth.uid() = dairy_id)
   WITH CHECK (auth.uid() = dairy_id);
 
--- Customers can view ONLY their explicitly linked customer record
--- Note: Does NOT automatically expose records based on email matching!
+DROP POLICY IF EXISTS "Customers can view their explicitly linked customer record" ON public.customers;
+DROP POLICY IF EXISTS "Customers can view their linked profile" ON public.customers;
 CREATE POLICY "Customers can view their explicitly linked customer record"
   ON public.customers FOR SELECT
   USING (auth.uid() = user_id);
 
+-- --------------------------------------------------------------------
 -- 3. Deliveries Table
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.deliveries (
   id TEXT PRIMARY KEY,
   dairy_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -77,13 +103,14 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
 
 ALTER TABLE public.deliveries ENABLE ROW LEVEL SECURITY;
 
--- Sellers can manage their own milk deliveries
+DROP POLICY IF EXISTS "Sellers can manage their milk deliveries" ON public.deliveries;
 CREATE POLICY "Sellers can manage their milk deliveries"
   ON public.deliveries FOR ALL
   USING (auth.uid() = dairy_id)
   WITH CHECK (auth.uid() = dairy_id);
 
--- Customers can ONLY view deliveries for their explicitly linked account
+DROP POLICY IF EXISTS "Customers can view only their own milk deliveries" ON public.deliveries;
+DROP POLICY IF EXISTS "Customers can view their own milk deliveries" ON public.deliveries;
 CREATE POLICY "Customers can view only their own milk deliveries"
   ON public.deliveries FOR SELECT
   USING (
@@ -93,7 +120,9 @@ CREATE POLICY "Customers can view only their own milk deliveries"
     )
   );
 
+-- --------------------------------------------------------------------
 -- 4. Payments Table
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.payments (
   id TEXT PRIMARY KEY,
   dairy_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -109,13 +138,14 @@ CREATE TABLE IF NOT EXISTS public.payments (
 
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
--- Sellers can manage payments received
+DROP POLICY IF EXISTS "Sellers can manage their received payments" ON public.payments;
 CREATE POLICY "Sellers can manage their received payments"
   ON public.payments FOR ALL
   USING (auth.uid() = dairy_id)
   WITH CHECK (auth.uid() = dairy_id);
 
--- Customers can ONLY view payments made for their explicitly linked account
+DROP POLICY IF EXISTS "Customers can view only their own payments" ON public.payments;
+DROP POLICY IF EXISTS "Customers can view their payments" ON public.payments;
 CREATE POLICY "Customers can view only their own payments"
   ON public.payments FOR SELECT
   USING (
@@ -125,7 +155,9 @@ CREATE POLICY "Customers can view only their own payments"
     )
   );
 
+-- --------------------------------------------------------------------
 -- 5. Adjustments Table
+-- --------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.adjustments (
   id TEXT PRIMARY KEY,
   dairy_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -141,11 +173,14 @@ CREATE TABLE IF NOT EXISTS public.adjustments (
 
 ALTER TABLE public.adjustments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Sellers can manage their ledger adjustments" ON public.adjustments;
 CREATE POLICY "Sellers can manage their ledger adjustments"
   ON public.adjustments FOR ALL
   USING (auth.uid() = dairy_id)
   WITH CHECK (auth.uid() = dairy_id);
 
+DROP POLICY IF EXISTS "Customers can view only their own adjustments" ON public.adjustments;
+DROP POLICY IF EXISTS "Customers can view their adjustments" ON public.adjustments;
 CREATE POLICY "Customers can view only their own adjustments"
   ON public.adjustments FOR SELECT
   USING (
@@ -155,8 +190,9 @@ CREATE POLICY "Customers can view only their own adjustments"
     )
   );
 
+-- --------------------------------------------------------------------
 -- 6. Secure Database Function: Connect Customer Account via Seller-Issued Code
--- This enforces that customer accounts connect strictly through a seller-issued customer code
+-- --------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.link_customer_account(p_customer_code TEXT)
 RETURNS JSONB AS $$
 DECLARE
@@ -204,7 +240,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- --------------------------------------------------------------------
 -- 7. Trigger to automatically create profile on sign up
+-- --------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -216,7 +254,11 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'role', 'seller'),
     NEW.raw_user_meta_data->>'customer_code'
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    role = EXCLUDED.role,
+    customer_code = COALESCE(EXCLUDED.customer_code, profiles.customer_code),
+    updated_at = NOW();
 
   -- If customer_code was provided at sign up, attempt linking immediately
   IF NEW.raw_user_meta_data->>'customer_code' IS NOT NULL AND 
