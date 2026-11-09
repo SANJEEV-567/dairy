@@ -25,6 +25,7 @@ export default function PaymentModal({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
     if (paymentToEdit) {
       setCustomerId(paymentToEdit.customerId || '');
       setAmount(paymentToEdit.amount ? paymentToEdit.amount.toString() : '');
@@ -50,7 +51,7 @@ export default function PaymentModal({
       }
     }
     setError('');
-  }, [isOpen, preselectedCustomer, prefilledAmount, paymentToEdit, customers.length]);
+  }, [isOpen, preselectedCustomer, prefilledAmount, paymentToEdit]);
 
   if (!isOpen) return null;
 

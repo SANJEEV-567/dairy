@@ -53,33 +53,43 @@ export default function DailyEntryView({
 
   // Initialize drafts whenever selectedDate or activeCustomers change
   useEffect(() => {
-    const newDrafts = {};
-    const defaultTime = getCurrentTimeKolkata();
+    setDrafts(prev => {
+      const newDrafts = {};
+      const defaultTime = getCurrentTimeKolkata();
 
-    activeCustomers.forEach(c => {
-      const existing = dayDeliveriesMap[c.id];
-      if (existing) {
-        newDrafts[c.id] = {
-          quantityKg: existing.quantityKg.toString(),
-          pricePerKg: existing.pricePerKg.toString(),
-          time: existing.time || defaultTime,
-          note: existing.note || '',
-          saved: true,
-          deliveryId: existing.id
-        };
-      } else {
-        newDrafts[c.id] = {
-          quantityKg: (c.usualQuantityKg || 1).toString(),
-          pricePerKg: (c.usualPricePerKg || 60).toString(),
-          time: defaultTime,
-          note: '',
-          saved: false,
-          deliveryId: null
-        };
-      }
+      activeCustomers.forEach(c => {
+        // If user already typed something unsaved for this customer on this date, preserve it!
+        if (prev[c.id] && prev[c.id].date === selectedDate && !prev[c.id].saved) {
+          newDrafts[c.id] = prev[c.id];
+          return;
+        }
+
+        const existing = dayDeliveriesMap[c.id];
+        if (existing) {
+          newDrafts[c.id] = {
+            date: selectedDate,
+            quantityKg: existing.quantityKg.toString(),
+            pricePerKg: existing.pricePerKg.toString(),
+            time: existing.time || defaultTime,
+            note: existing.note || '',
+            saved: true,
+            deliveryId: existing.id
+          };
+        } else {
+          newDrafts[c.id] = {
+            date: selectedDate,
+            quantityKg: (c.usualQuantityKg || 1).toString(),
+            pricePerKg: (c.usualPricePerKg || 60).toString(),
+            time: defaultTime,
+            note: '',
+            saved: false,
+            deliveryId: null
+          };
+        }
+      });
+
+      return newDrafts;
     });
-
-    setDrafts(newDrafts);
   }, [selectedDate, customers, deliveries]);
 
   const handlePrevDay = () => {

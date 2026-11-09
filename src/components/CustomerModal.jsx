@@ -22,29 +22,31 @@ export default function CustomerModal({
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    if (customerToEdit) {
-      setName(customerToEdit.name || '');
-      setCustomerCode(customerToEdit.customerCode || generateCustomerCode(customers));
-      setPhone(customerToEdit.phone || '');
-      setAddress(customerToEdit.address || '');
-      setUsualQuantityKg((customerToEdit.usualQuantityKg || 1).toString());
-      setUsualPricePerKg((customerToEdit.usualPricePerKg || 60).toString());
-      setNotes(customerToEdit.notes || '');
-      setStatus(customerToEdit.status || 'active');
-      setOpeningBalance('0'); // Existing customers already have their balance tracked in ledger
-    } else {
-      setName('');
-      setCustomerCode(generateCustomerCode(customers));
-      setPhone('');
-      setAddress('');
-      setUsualQuantityKg('1.0');
-      setUsualPricePerKg('60');
-      setNotes('');
-      setStatus('active');
-      setOpeningBalance('0');
+    if (isOpen) {
+      if (customerToEdit) {
+        setName(customerToEdit.name || '');
+        setCustomerCode(customerToEdit.customerCode || generateCustomerCode(customers));
+        setPhone(customerToEdit.phone || '');
+        setAddress(customerToEdit.address || '');
+        setUsualQuantityKg((customerToEdit.usualQuantityKg || 1).toString());
+        setUsualPricePerKg((customerToEdit.usualPricePerKg || 60).toString());
+        setNotes(customerToEdit.notes || '');
+        setStatus(customerToEdit.status || 'active');
+        setOpeningBalance('0'); // Existing customers already have their balance tracked in ledger
+      } else {
+        setName('');
+        setCustomerCode(generateCustomerCode(customers));
+        setPhone('');
+        setAddress('');
+        setUsualQuantityKg('1.0');
+        setUsualPricePerKg('60');
+        setNotes('');
+        setStatus('active');
+        setOpeningBalance('0');
+      }
+      setErrors({});
     }
-    setErrors({});
-  }, [customerToEdit, isOpen, customers]);
+  }, [customerToEdit, isOpen]);
 
   if (!isOpen) return null;
 

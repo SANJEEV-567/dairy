@@ -55,7 +55,8 @@ export default function DashboardView({
   const filteredCustomerSummary = metrics.customerSummary.filter(item => {
     const nameMatch = item.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
     const phoneMatch = item.customer.phone && item.customer.phone.includes(searchTerm);
-    return nameMatch || phoneMatch;
+    const codeMatch = item.customer.customerCode && item.customer.customerCode.toLowerCase().includes(searchTerm.toLowerCase());
+    return nameMatch || phoneMatch || codeMatch;
   });
 
   return (

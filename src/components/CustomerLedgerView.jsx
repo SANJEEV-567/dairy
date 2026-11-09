@@ -21,7 +21,8 @@ import {
   formatKg, 
   formatDateIndian, 
   formatTimeIndian, 
-  getRecentMonthOptions 
+  getRecentMonthOptions,
+  roundToTwo
 } from '../utils/formatters';
 import { calculateCustomerLedger } from '../utils/calculations';
 
@@ -79,17 +80,23 @@ export default function CustomerLedgerView({
     : displayTransactions;
 
   // Period totals
-  const periodTotalDeliveriesKg = displayTransactions
-    .filter(t => t.type === 'delivery')
-    .reduce((sum, t) => sum + (t.quantityKg || 0), 0);
+  const periodTotalDeliveriesKg = roundToTwo(
+    displayTransactions
+      .filter(t => t.type === 'delivery')
+      .reduce((sum, t) => sum + (t.quantityKg || 0), 0)
+  );
 
-  const periodTotalCharges = displayTransactions
-    .filter(t => t.type === 'delivery' || (t.type === 'adjustment' && t.effect === 'debit'))
-    .reduce((sum, t) => sum + t.amount, 0);
+  const periodTotalCharges = roundToTwo(
+    displayTransactions
+      .filter(t => t.type === 'delivery' || (t.type === 'adjustment' && t.effect === 'debit'))
+      .reduce((sum, t) => sum + t.amount, 0)
+  );
 
-  const periodTotalPayments = displayTransactions
-    .filter(t => t.type === 'payment' || (t.type === 'adjustment' && t.effect === 'credit'))
-    .reduce((sum, t) => sum + t.amount, 0);
+  const periodTotalPayments = roundToTwo(
+    displayTransactions
+      .filter(t => t.type === 'payment' || (t.type === 'adjustment' && t.effect === 'credit'))
+      .reduce((sum, t) => sum + t.amount, 0)
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">

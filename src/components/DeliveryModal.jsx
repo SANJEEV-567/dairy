@@ -20,6 +20,7 @@ export default function DeliveryModal({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
     if (deliveryToEdit) {
       setCustomerId(deliveryToEdit.customerId || '');
       setDeliveryDate(deliveryToEdit.date || getTodayKolkata());
@@ -37,7 +38,7 @@ export default function DeliveryModal({
       setNote('');
     }
     setError('');
-  }, [isOpen, customer, date, deliveryToEdit, customers.length]);
+  }, [isOpen, customer, date, deliveryToEdit]);
 
   if (!isOpen) return null;
 

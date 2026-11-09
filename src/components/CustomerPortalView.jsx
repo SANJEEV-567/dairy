@@ -33,7 +33,8 @@ import {
   formatTimeIndian, 
   formatMonthYear, 
   getRecentMonthOptions,
-  getTodayKolkata 
+  getTodayKolkata,
+  getCurrentTimeKolkata 
 } from '../utils/formatters';
 import { calculateCustomerLedger, generateMonthlyBill } from '../utils/calculations';
 
@@ -211,7 +212,7 @@ export default function CustomerPortalView({
       customerId: customerRecord.id,
       amount: amt,
       date: getTodayKolkata(),
-      time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      time: getCurrentTimeKolkata(),
       paymentMethod: upiMethod,
       note: `Online Payment (Ref: ${upiRefNumber.trim()})`
     });

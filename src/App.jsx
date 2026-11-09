@@ -941,6 +941,7 @@ export default function App() {
             deliveries={deliveries}
             payments={payments}
             adjustments={adjustments}
+            currentUser={currentUser}
             onDataReloaded={handleDataReloaded}
             showToast={showToast}
           />

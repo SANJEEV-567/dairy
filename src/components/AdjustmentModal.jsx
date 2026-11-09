@@ -19,6 +19,7 @@ export default function AdjustmentModal({
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
     if (adjustmentToEdit) {
       setCustomerId(adjustmentToEdit.customerId || '');
       setType(adjustmentToEdit.type || 'debit');
@@ -35,7 +36,7 @@ export default function AdjustmentModal({
       setReason('');
     }
     setError('');
-  }, [isOpen, preselectedCustomer, adjustmentToEdit, customers.length]);
+  }, [isOpen, preselectedCustomer, adjustmentToEdit]);
 
   if (!isOpen) return null;
 

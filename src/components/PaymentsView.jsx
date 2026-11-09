@@ -17,7 +17,8 @@ import {
   formatDateIndian, 
   formatTimeIndian, 
   getTodayKolkata,
-  getRecentMonthOptions 
+  getRecentMonthOptions,
+  roundToTwo
 } from '../utils/formatters';
 
 export default function PaymentsView({
@@ -42,8 +43,10 @@ export default function PaymentsView({
     .filter(p => {
       const cust = customerMap[p.customerId];
       const custName = cust ? cust.name.toLowerCase() : '';
+      const custCode = cust?.customerCode ? cust.customerCode.toLowerCase() : '';
       const matchesSearch = 
         custName.includes(searchTerm.toLowerCase()) ||
+        custCode.includes(searchTerm.toLowerCase()) ||
         (p.note && p.note.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (p.paymentMethod && p.paymentMethod.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -58,7 +61,7 @@ export default function PaymentsView({
       return (b.time || '').localeCompare(a.time || '');
     });
 
-  const totalFilteredAmount = filteredPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalFilteredAmount = roundToTwo(filteredPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0));
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">

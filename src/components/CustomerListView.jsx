@@ -45,6 +45,7 @@ export default function CustomerListView({
     const matchesSearch = 
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.phone && c.phone.includes(searchTerm)) ||
+      (c.customerCode && c.customerCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (c.address && c.address.toLowerCase().includes(searchTerm.toLowerCase()));
 
     if (!matchesSearch) return false;

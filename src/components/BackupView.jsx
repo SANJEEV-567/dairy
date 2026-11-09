@@ -20,6 +20,7 @@ export default function BackupView({
   deliveries = [],
   payments = [],
   adjustments = [],
+  currentUser = null,
   onDataReloaded,
   showToast
 }) {
@@ -27,9 +28,11 @@ export default function BackupView({
   const [clearInput, setClearInput] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  const userId = currentUser?.id || null;
+
   const handleDownloadBackup = () => {
     try {
-      const jsonString = exportAllData();
+      const jsonString = exportAllData(userId);
       const blob = new Blob([jsonString], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -55,7 +58,7 @@ export default function BackupView({
     reader.onload = (event) => {
       try {
         const content = event.target?.result;
-        const res = importAllData(content);
+        const res = importAllData(content, userId);
         if (res.success) {
           showToast(`Successfully restored: ${res.stats.customers} customers, ${res.stats.deliveries} deliveries, ${res.stats.payments} payments!`, "success");
           onDataReloaded();
@@ -76,7 +79,7 @@ export default function BackupView({
       showToast("Please type CLEAR to confirm data reset", "error");
       return;
     }
-    clearAllData();
+    clearAllData(userId);
     setShowClearConfirm(false);
     setClearInput('');
     showToast("All data cleared successfully.", "success");
