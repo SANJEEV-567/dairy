@@ -193,12 +193,18 @@ async function testAuthSafety() {
   assert.strictEqual(noPasswordSignIn.success, false);
   assert.strictEqual(noPasswordSignIn.error, "Please enter your password.");
 
-  // 5. Authorized seller with password calls backend (returns notConfigured in test without env vars)
-  const authorizedSignIn = await signInUser({ email: 'sanjeevkumarxcg@gmail.com', password: 'password123' });
-  assert.strictEqual(authorizedSignIn.success, false);
-  assert.strictEqual(authorizedSignIn.notConfigured, true, "Must flag notConfigured when live backend not configured");
+  // 5. Authorized seller with wrong password fails
+  const wrongPassSignIn = await signInUser({ email: 'sanjeevkumarxcg@gmail.com', password: 'wrongPassword' });
+  assert.strictEqual(wrongPassSignIn.success, false);
+  assert.ok(wrongPassSignIn.error.includes("Incorrect password"), "Must return incorrect password error");
 
-  // 6. Google sign in is disabled in single-seller mode
+  // 6. Authorized seller with valid master password Sanjeev@123 succeeds immediately
+  const authorizedSignIn = await signInUser({ email: 'sanjeevkumarxcg@gmail.com', password: 'Sanjeev@123' });
+  assert.strictEqual(authorizedSignIn.success, true, "Valid seller credentials must log in immediately");
+  assert.strictEqual(authorizedSignIn.user.email, 'sanjeevkumarxcg@gmail.com', "User email must match seller");
+  assert.strictEqual(authorizedSignIn.user.role, 'seller', "User role must be seller");
+
+  // 7. Google sign in is disabled in single-seller mode
   const googleOAuthRes = await signInWithGoogleOAuth();
   assert.strictEqual(googleOAuthRes.success, false, "Google OAuth must be disabled");
   assert.ok(googleOAuthRes.error.includes("disabled"), "Google OAuth error must mention disabled");

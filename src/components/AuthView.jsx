@@ -70,11 +70,6 @@ export default function AuthView({ onAuthSuccess, showToast }) {
       return;
     }
 
-    if (!backendConfigured) {
-      setErrorMessage("Authentication provider is not connected. Please click 'Configure Backend' to connect your Supabase project.");
-      return;
-    }
-
     setLoading(true);
     const result = await signInUser({ email: cleanEmail, password });
     setLoading(false);
@@ -151,28 +146,6 @@ export default function AuthView({ onAuthSuccess, showToast }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50/40 to-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      
-      {/* Backend Status Alert if not connected */}
-      {!backendConfigured && (
-        <div className="max-w-md mx-auto w-full px-4 mb-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-900 shadow-xs">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="font-bold">Supabase Backend Unconnected</p>
-              <p className="mt-0.5 text-amber-700">Connect your Supabase Project URL and Public Anon Key to enable live database authentication.</p>
-              <button
-                type="button"
-                onClick={() => setSetupModalOpen(true)}
-                className="mt-2 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-md transition-colors inline-flex items-center gap-1"
-              >
-                <Settings className="w-3 h-3" />
-                Configure Backend
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Container */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md px-4">
         
