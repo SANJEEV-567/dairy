@@ -181,3 +181,17 @@ export function addDays(dateStr, days) {
 export function roundToTwo(num) {
   return Math.round((Number(num) + Number.EPSILON) * 100) / 100;
 }
+
+/**
+ * Generate a unique Seller-Issued Customer Code e.g. DSK-1001
+ */
+export function generateCustomerCode(existingCustomers = []) {
+  const existingCodes = new Set(
+    existingCustomers.map(c => c?.customerCode?.toUpperCase()).filter(Boolean)
+  );
+  for (let i = 1001; i <= 9999; i++) {
+    const code = `DSK-${i}`;
+    if (!existingCodes.has(code)) return code;
+  }
+  return `DSK-${Math.floor(1000 + Math.random() * 9000)}`;
+}

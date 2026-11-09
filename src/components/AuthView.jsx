@@ -6,8 +6,6 @@ import {
   Eye, 
   EyeOff, 
   User, 
-  Phone, 
-  MapPin, 
   ArrowRight, 
   ShieldCheck, 
   Building2, 
@@ -16,7 +14,6 @@ import {
   CheckCircle2,
   Settings,
   KeyRound,
-  RotateCcw,
   Sparkles
 } from 'lucide-react';
 import { DAIRY_NAME, DAIRY_TAGLINE } from '../utils/constants';
@@ -24,7 +21,6 @@ import { isSupabaseConfigured } from '../utils/supabase.js';
 import { 
   signInUser, 
   signUpUser, 
-  signInWithGoogleOAuth, 
   sendPasswordResetEmail, 
   updateUserPassword 
 } from '../utils/authService.js';
@@ -41,9 +37,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
-  const [usualQuantityKg, setUsualQuantityKg] = useState('1.0');
+  const [customerCode, setCustomerCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -54,7 +48,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [backendConfigured, setBackendConfigured] = useState(isSupabaseConfigured());
 
-  // Check URL hash for recovery/password reset callback
+  // Check URL hash for recovery/password reset callback from email link
   useEffect(() => {
     if (window.location.hash.includes('type=recovery') || window.location.hash.includes('reset-password')) {
       setMode('update-password');
@@ -65,6 +59,12 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     setBackendConfigured(isSupabaseConfigured());
   };
 
+  // Email format validator
+  const isValidEmail = (val) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+  };
+
+  // 1. Email & Password Sign In
   const handleSignIn = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -75,13 +75,24 @@ export default function AuthView({ onAuthSuccess, showToast }) {
       return;
     }
 
-    if (!email.trim() || !password) {
-      setErrorMessage("Please enter both email and password.");
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErrorMessage("Please enter your email address.");
+      return;
+    }
+
+    if (!isValidEmail(cleanEmail)) {
+      setErrorMessage("Please enter a valid email address (e.g. name@example.com).");
+      return;
+    }
+
+    if (!password) {
+      setErrorMessage("Please enter your password.");
       return;
     }
 
     setLoading(true);
-    const result = await signInUser({ email, password });
+    const result = await signInUser({ email: cleanEmail, password });
     setLoading(false);
 
     if (result.success) {
@@ -92,6 +103,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     }
   };
 
+  // 2. Email & Password Sign Up (Email-Only, No OTP/SMS)
   const handleSignUp = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -102,46 +114,56 @@ export default function AuthView({ onAuthSuccess, showToast }) {
       return;
     }
 
-    if (!name.trim()) {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+
+    if (!cleanName) {
       setErrorMessage("Please enter your full name.");
       return;
     }
 
+    if (!cleanEmail) {
+      setErrorMessage("Please enter your email address.");
+      return;
+    }
+
+    if (!isValidEmail(cleanEmail)) {
+      setErrorMessage("Please enter a valid email address (e.g. name@example.com).");
+      return;
+    }
+
     if (password.length < 6) {
-      setErrorMessage("Password must be at least 6 characters.");
+      setErrorMessage("Password must be at least 6 characters long.");
       return;
     }
 
     setLoading(true);
     const result = await signUpUser({
-      email,
-      password,
-      name,
-      role,
-      phone,
-      address,
-      usualQuantityKg: parseFloat(usualQuantityKg) || 1.0
+      email: cleanEmail,
+      password: password,
+      name: cleanName,
+      role: role,
+      customerCode: role === 'customer' ? customerCode.trim().toUpperCase() : ''
     });
     setLoading(false);
 
     if (result.success) {
       if (result.needsEmailVerification) {
         setVerificationPending(true);
-        setSuccessMessage(`Account created! A confirmation email has been sent to ${email}. Please verify your email before signing in.`);
+        setSuccessMessage(`Account created! A confirmation email has been sent to ${cleanEmail}. Please verify your email before signing in.`);
       } else {
-        showToast(`Account created successfully! Welcome, ${result.user?.user_metadata?.name || name}.`, 'success');
+        showToast(`Account created successfully! Welcome, ${cleanName}.`, 'success');
         if (result.session) {
           onAuthSuccess({
             id: result.user.id,
             email: result.user.email,
-            name: name.trim(),
+            name: cleanName,
             role: role,
-            phone: phone.trim(),
-            address: address.trim()
+            customerCode: role === 'customer' ? customerCode.trim().toUpperCase() : ''
           });
         } else {
           setMode('login');
-          setSuccessMessage("Account created successfully! Please sign in with your credentials.");
+          setSuccessMessage("Account created successfully! Please sign in with your email and password.");
         }
       }
     } else {
@@ -149,6 +171,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     }
   };
 
+  // 3. Real Password Reset Request
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -159,13 +182,14 @@ export default function AuthView({ onAuthSuccess, showToast }) {
       return;
     }
 
-    if (!email.trim()) {
-      setErrorMessage("Please enter your registered email address.");
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !isValidEmail(cleanEmail)) {
+      setErrorMessage("Please enter a valid registered email address.");
       return;
     }
 
     setLoading(true);
-    const result = await sendPasswordResetEmail(email);
+    const result = await sendPasswordResetEmail(cleanEmail);
     setLoading(false);
 
     if (result.success) {
@@ -175,13 +199,14 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     }
   };
 
+  // 4. Update Password (Recovery Flow Callback)
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
 
     if (newPassword.length < 6) {
-      setErrorMessage("New password must be at least 6 characters.");
+      setErrorMessage("New password must be at least 6 characters long.");
       return;
     }
 
@@ -199,26 +224,10 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     }
   };
 
-  const handleGoogleOAuth = async () => {
-    setErrorMessage('');
-    if (!backendConfigured) {
-      setErrorMessage("Authentication provider is not configured. Please connect your Supabase project to enable Google OAuth.");
-      return;
-    }
-
-    setLoading(true);
-    const result = await signInWithGoogleOAuth(role);
-    setLoading(false);
-
-    if (!result.success) {
-      setErrorMessage(result.error);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden selection:bg-emerald-500 selection:text-white">
       
-      {/* Background Decorative Glow */}
+      {/* Background Subtle Ambience */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -258,7 +267,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   Backend Setup Required
                 </span>
                 <p className="text-amber-200/80 mt-0.5 leading-relaxed">
-                  Real authentication with password hashing and row isolation requires connecting your Supabase project. Passwords are never stored in browser storage.
+                  Real authentication with secure password hashing and Row-Level Security requires connecting your Supabase project. Passwords are never stored in browser storage.
                 </p>
                 <button
                   type="button"
@@ -292,7 +301,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                 Reset Your Password
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                We will send password reset instructions to your verified email address.
+                We will send real password reset instructions to your verified email address.
               </p>
             </div>
           ) : (
@@ -313,7 +322,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   }`}
                 >
                   <Building2 className="w-4 h-4 text-emerald-600" />
-                  <span>Seller Portal</span>
+                  <span>Seller (Dairy)</span>
                 </button>
                 <button
                   type="button"
@@ -329,7 +338,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   }`}
                 >
                   <Users className="w-4 h-4 text-emerald-600" />
-                  <span>Customer Portal</span>
+                  <span>Customer (Buyer)</span>
                 </button>
               </div>
 
@@ -338,13 +347,13 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                 <div>
                   <h2 className="text-lg font-black text-slate-900">
                     {mode === 'login' 
-                      ? (role === 'seller' ? 'Seller Sign In' : 'Customer Sign In') 
-                      : (role === 'seller' ? 'Create Seller Account' : 'Customer Sign Up')}
+                      ? (role === 'seller' ? 'Seller Login' : 'Customer Login') 
+                      : (role === 'seller' ? 'Seller Sign Up' : 'Customer Sign Up')}
                   </h2>
                   <p className="text-xs text-slate-500">
                     {role === 'seller' 
-                      ? 'Dairy management & monthly billing' 
-                      : 'Check daily milk delivered & bills'}
+                      ? 'Manage milk deliveries & monthly bills' 
+                      : 'View your daily milk records & bills'}
                   </p>
                 </div>
 
@@ -357,39 +366,8 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   }}
                   className="text-xs font-bold text-emerald-700 hover:text-emerald-800 hover:underline"
                 >
-                  {mode === 'login' ? 'New here? Sign Up' : 'Have account? Sign In'}
+                  {mode === 'login' ? 'Create Account' : 'Existing User? Log In'}
                 </button>
-              </div>
-            </>
-          )}
-
-          {/* Social Google OAuth (Only for login and signup) */}
-          {(mode === 'login' || mode === 'signup') && (
-            <>
-              <button
-                type="button"
-                onClick={handleGoogleOAuth}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs sm:text-sm shadow-xs transition-colors mb-5 disabled:opacity-50"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span>Continue with Google</span>
-              </button>
-
-              <div className="relative mb-5">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-200" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-3 text-slate-400 font-semibold">
-                    Or with email & password
-                  </span>
-                </div>
               </div>
             </>
           )}
@@ -423,7 +401,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
             </div>
           )}
 
-          {/* 1. SIGN IN FORM */}
+          {/* 1. SIGN IN FORM (EMAIL & PASSWORD) */}
           {mode === 'login' && (
             <form onSubmit={handleSignIn} className="space-y-4">
               <div>
@@ -435,7 +413,8 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   <input
                     type="email"
                     required
-                    placeholder={role === 'seller' ? 'seller@dairy.com' : 'customer@gmail.com'}
+                    autoComplete="email"
+                    placeholder="name@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -465,6 +444,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    autoComplete="current-password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -486,13 +466,30 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-700/20 transition-all cursor-pointer disabled:opacity-50"
               >
-                <span>{loading ? 'Authenticating...' : `Sign In as ${role === 'seller' ? 'Seller' : 'Customer'}`}</span>
+                <span>{loading ? 'Signing In...' : `Sign In as ${role === 'seller' ? 'Seller' : 'Customer'}`}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-500">
+                  Don't have an account yet?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signup');
+                      setErrorMessage('');
+                      setSuccessMessage('');
+                    }}
+                    className="font-bold text-emerald-700 hover:underline"
+                  >
+                    Create Account
+                  </button>
+                </span>
+              </div>
             </form>
           )}
 
-          {/* 2. SIGN UP FORM */}
+          {/* 2. SIGN UP FORM (EMAIL-ONLY, NO OTP) */}
           {mode === 'signup' && (
             <form onSubmit={handleSignUp} className="space-y-4">
               <div>
@@ -504,7 +501,8 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   <input
                     type="text"
                     required
-                    placeholder={role === 'seller' ? 'Dr. Sanjay Kumar' : 'e.g. Ramesh Sharma'}
+                    autoComplete="name"
+                    placeholder={role === 'seller' ? 'Enter dairy owner full name' : 'Enter customer full name'}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -521,6 +519,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   <input
                     type="email"
                     required
+                    autoComplete="email"
                     placeholder="name@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -531,7 +530,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
-                  Password (min 6 characters) <span className="text-rose-500">*</span>
+                  Password <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -539,7 +538,8 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                     type={showPassword ? 'text' : 'password'}
                     required
                     minLength={6}
-                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    placeholder="At least 6 characters"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-9 pr-10 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -553,59 +553,31 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500 mt-1">Must be at least 6 characters long.</p>
               </div>
 
-              {/* Customer Specific Registration Fields */}
+              {/* Optional Seller-Issued Customer Code for Customer Sign Up */}
               {role === 'customer' && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
-                        Phone Number
-                      </label>
-                      <div className="relative">
-                        <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="tel"
-                          placeholder="9876543210"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
-                        Daily Milk (kg)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="0.5"
-                        value={usualQuantityKg}
-                        onChange={(e) => setUsualQuantityKg(e.target.value)}
-                        className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 font-mono-numbers focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
-                      Delivery Address
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold uppercase text-slate-600">
+                      Seller-Issued Customer Code (Optional)
                     </label>
-                    <div className="relative">
-                      <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="House No, Colony, Landmark..."
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
                   </div>
-                </>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-emerald-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="e.g. DSK-1001"
+                      value={customerCode}
+                      onChange={(e) => setCustomerCode(e.target.value.toUpperCase())}
+                      className="w-full pl-9 pr-3 py-2 text-sm font-mono font-bold uppercase tracking-wider rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    If Dr. Sanjay Kumar Dairy gave you a code, enter it now, or link it later inside your portal.
+                  </p>
+                </div>
               )}
 
               <button
@@ -613,9 +585,26 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-700/20 transition-all cursor-pointer disabled:opacity-50"
               >
-                <span>{loading ? 'Creating Account...' : 'Complete Sign Up'}</span>
+                <span>{loading ? 'Creating Account...' : `Sign Up as ${role === 'seller' ? 'Seller' : 'Customer'}`}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              <div className="text-center pt-2">
+                <span className="text-xs text-slate-500">
+                  Already have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setErrorMessage('');
+                      setSuccessMessage('');
+                    }}
+                    className="font-bold text-emerald-700 hover:underline"
+                  >
+                    Sign In
+                  </button>
+                </span>
+              </div>
             </form>
           )}
 
@@ -631,6 +620,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                   <input
                     type="email"
                     required
+                    autoComplete="email"
                     placeholder="your-email@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -686,6 +676,7 @@ export default function AuthView({ onAuthSuccess, showToast }) {
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>

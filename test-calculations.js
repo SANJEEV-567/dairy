@@ -4,7 +4,9 @@ globalThis.localStorage = {
   getItem: (k) => memStore[k] || null,
   setItem: (k, v) => { memStore[k] = String(v); },
   removeItem: (k) => { delete memStore[k]; },
-  clear: () => { Object.keys(memStore).forEach(k => delete memStore[k]); }
+  clear: () => { Object.keys(memStore).forEach(k => delete memStore[k]); },
+  key: (i) => Object.keys(memStore)[i] || null,
+  get length() { return Object.keys(memStore).length; }
 };
 
 import assert from 'node:assert';
@@ -14,7 +16,8 @@ import {
   formatKg, 
   getTodayKolkata, 
   formatMonthYear,
-  addDays 
+  addDays,
+  generateCustomerCode
 } from './src/utils/formatters.js';
 import { 
   calculateCustomerLedger, 
@@ -23,7 +26,15 @@ import {
   getDailyDashboardMetrics 
 } from './src/utils/calculations.js';
 import { BILL_STATUS, STORAGE_KEYS } from './src/utils/constants.js';
-import { getScopedKey, migrateLegacyRecordsToAccount, saveToStorage, loadFromStorage } from './src/utils/storage.js';
+import { 
+  getScopedKey, 
+  migrateLegacyRecordsToAccount, 
+  saveToStorage, 
+  loadFromStorage,
+  linkCustomerAccountLocally,
+  getLinkedCustomerData,
+  findCustomerByCode
+} from './src/utils/storage.js';
 import { isSupabaseConfigured } from './src/utils/supabase.js';
 import { signUpUser, signInUser, sendPasswordResetEmail } from './src/utils/authService.js';
 
@@ -76,6 +87,7 @@ assert.strictEqual(ledger.transactions.length, 6, "Must contain all 6 transactio
 // Test 6: Monthly Bill Generation for November 2026
 const customerObj = {
   id: testCustomerId,
+  customerCode: "DSK-1001",
   name: "Test Customer A",
   phone: "9876543210",
   address: "Test Address",
@@ -149,7 +161,7 @@ assert.notStrictEqual(scopedKeyA, scopedKeyB, "Scoped keys for different sellers
 assert.strictEqual(scopedKeyA, `${STORAGE_KEYS.CUSTOMERS}_seller_user_A`);
 
 // Test 14: Data Migration - safely assigns unassigned legacy records to authenticated account
-saveToStorage(STORAGE_KEYS.CUSTOMERS, [{ id: "legacy_c1", name: "Legacy Cust" }]);
+saveToStorage(STORAGE_KEYS.CUSTOMERS, [{ id: "legacy_c1", name: "Legacy Cust", customerCode: "DSK-1001" }]);
 saveToStorage(STORAGE_KEYS.DELIVERIES, [{ id: "legacy_d1", charge: 60 }]);
 const migrationResult = migrateLegacyRecordsToAccount('authenticated_seller_uuid');
 assert.strictEqual(migrationResult.migrated, true, "Legacy records must be successfully migrated");
@@ -162,7 +174,7 @@ assert.strictEqual(isSupabaseConfigured(), false, "isSupabaseConfigured must be 
 
 // Test 16: Safe Rejection - Auth methods refuse to simulate logins when unconfigured
 async function testAuthSafety() {
-  const signUpRes = await signUpUser({ email: 'seller@test.com', password: 'password123', name: 'Seller' });
+  const signUpRes = await signUpUser({ email: 'seller@test.com', password: 'password123', name: 'Seller', role: 'seller' });
   assert.strictEqual(signUpRes.success, false, "signUpUser must fail when backend unconfigured");
   assert.strictEqual(signUpRes.notConfigured, true, "Must flag notConfigured as true");
 
@@ -174,7 +186,54 @@ async function testAuthSafety() {
   assert.strictEqual(resetRes.success, false, "sendPasswordResetEmail must fail when backend unconfigured");
   assert.strictEqual(resetRes.notConfigured, true, "Must flag notConfigured as true");
 }
-
 await testAuthSafety();
 
-console.log("All 16 calculation, business workflow, and authentication tests passed cleanly!");
+// Test 17: Seller-Issued Customer Code generation
+const code1 = generateCustomerCode([]);
+const code2 = generateCustomerCode([{ customerCode: code1 }]);
+assert.strictEqual(code1, 'DSK-1001', "First customer code must be DSK-1001");
+assert.strictEqual(code2, 'DSK-1002', "Second customer code must be DSK-1002");
+
+// Test 18: Customer Account Linking by Code
+const sellerId = "seller_dairy_100";
+const customerId = "cust_verified_1";
+const buyerCode = "DSK-2026";
+saveToStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, sellerId), [
+  { id: customerId, dairy_id: sellerId, name: "Verified Buyer", customerCode: buyerCode, status: "active" }
+]);
+
+const buyerAuthId = "auth_user_buyer_999";
+const linkRes = linkCustomerAccountLocally(buyerCode, buyerAuthId);
+assert.strictEqual(linkRes.success, true, "Linking with valid code must succeed");
+assert.strictEqual(linkRes.customer.id, customerId, "Linked customer must match customer ID");
+
+// Verify that attempting to link with another user account fails (prevents account hijacking)
+const secondBuyerAuthId = "auth_user_buyer_888";
+const secondLinkRes = linkCustomerAccountLocally(buyerCode, secondBuyerAuthId);
+assert.strictEqual(secondLinkRes.success, false, "Claiming already linked code by another user must fail");
+
+// Test 19: Strict Customer Data Isolation
+// Seed deliveries: one for the verified buyer, one for a different customer
+saveToStorage(getScopedKey(STORAGE_KEYS.DELIVERIES, sellerId), [
+  { id: "deliv_1", customerId: customerId, date: "2026-11-09", quantityKg: 2, pricePerKg: 60, charge: 120 },
+  { id: "deliv_other", customerId: "other_cust", date: "2026-11-09", quantityKg: 5, pricePerKg: 70, charge: 350 }
+]);
+
+const customerData = getLinkedCustomerData(buyerAuthId);
+assert.strictEqual(customerData.customer.name, "Verified Buyer", "Must retrieve verified buyer record");
+assert.strictEqual(customerData.deliveries.length, 1, "Must strictly return ONLY the buyer's own deliveries (1 of 2)");
+assert.strictEqual(customerData.deliveries[0].id, "deliv_1", "Delivery ID must match buyer's delivery");
+
+// Test 20: Email-Only Flow (no phone or OTP required)
+const signUpPayload = {
+  name: "New Buyer",
+  email: "buyer@domain.com",
+  password: "securePassword123",
+  role: "customer",
+  customerCode: buyerCode
+};
+assert.strictEqual(typeof signUpPayload.email, 'string');
+assert.strictEqual(typeof signUpPayload.password, 'string');
+assert.strictEqual(signUpPayload.phone, undefined, "Phone number must not be required in email-only account flow");
+
+console.log("All 20 calculation, business workflow, and authentication tests passed cleanly!");

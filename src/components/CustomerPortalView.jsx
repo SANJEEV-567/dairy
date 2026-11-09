@@ -11,11 +11,13 @@ import {
   AlertCircle, 
   Phone, 
   MapPin, 
-  Share2,
-  FileText,
-  Send,
-  PauseCircle,
-  TrendingDown
+  Share2, 
+  FileText, 
+  Send, 
+  KeyRound, 
+  ShieldCheck, 
+  Link2,
+  Unlink
 } from 'lucide-react';
 import { 
   DAIRY_NAME, 
@@ -42,6 +44,7 @@ export default function CustomerPortalView({
   payments = [],
   adjustments = [],
   statusOverrides = [],
+  onLinkAccount,
   onCustomerPaymentSubmit,
   showToast
 }) {
@@ -49,27 +52,118 @@ export default function CustomerPortalView({
   const monthOptions = getRecentMonthOptions(6);
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0]?.value || '');
   
+  // Connection Form State
+  const [inputCode, setInputCode] = useState(currentUser?.customerCode || '');
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState('');
+
   // UPI Submission form
   const [upiAmount, setUpiAmount] = useState('');
   const [upiRefNumber, setUpiRefNumber] = useState('');
   const [upiMethod, setUpiMethod] = useState('UPI (GPay / PhonePe / Paytm)');
 
-  // Match the logged-in customer in dairy records
+  // Match the logged-in customer strictly by linked account or seller-issued code
+  // NEVER automatically expose records based solely on matching email or names!
   const customerRecord = customers.find(c => 
-    c.id === currentUser.customerId || 
-    (c.phone && currentUser.phone && c.phone === currentUser.phone) ||
-    c.name.toLowerCase() === currentUser.name.toLowerCase()
-  ) || {
-    id: currentUser.customerId || 'cust_temp',
-    name: currentUser.name,
-    phone: currentUser.phone || '',
-    address: currentUser.address || '',
-    usualQuantityKg: 1.5,
-    usualPricePerKg: 60,
-    status: 'active'
+    (c.linkedUserId && c.linkedUserId === currentUser.id) ||
+    (currentUser.customerCode && c.customerCode && c.customerCode.toUpperCase() === currentUser.customerCode.toUpperCase()) ||
+    (c.id === currentUser.customerId)
+  ) || null;
+
+  const handleConnectCode = async (e) => {
+    e.preventDefault();
+    setLinkError('');
+    const cleanCode = inputCode.trim().toUpperCase();
+
+    if (!cleanCode) {
+      setLinkError("Please enter your Seller-Issued Customer Code.");
+      return;
+    }
+
+    if (!onLinkAccount) {
+      setLinkError("Linking handler not configured.");
+      return;
+    }
+
+    setLinking(true);
+    const result = await onLinkAccount(cleanCode);
+    setLinking(false);
+
+    if (result.success) {
+      showToast(`Successfully connected to ${result.customerName || 'your customer record'}!`, 'success');
+      setLinkError('');
+    } else {
+      setLinkError(result.error || "Invalid customer code. Please check with Dr. Sanjay Kumar Dairy.");
+    }
   };
 
-  // Calculate customer ledger & current balance
+  // If customer account is not yet connected to a seller customer record, show Connection Screen
+  if (!customerRecord) {
+    return (
+      <div className="max-w-xl mx-auto py-8 sm:py-12 px-4 animate-in fade-in duration-200">
+        <div className="bg-white rounded-3xl p-6 sm:p-10 border border-slate-200/80 shadow-xl text-center">
+          
+          <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 ring-8 ring-emerald-50/50">
+            <KeyRound className="w-8 h-8" />
+          </div>
+
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            Connect to Dr. Sanjay Kumar Dairy
+          </h2>
+
+          <p className="text-xs sm:text-sm text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
+            To ensure complete privacy and confidentiality, <strong>Dr. Sanjay Kumar Dairy</strong> issues a personal <strong>Customer Code</strong> (e.g. <code>DSK-1001</code>) to each milk buyer. Only your authenticated account with this code can view your deliveries and bills.
+          </p>
+
+          <form onSubmit={handleConnectCode} className="mt-8 space-y-4 max-w-sm mx-auto text-left">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 mb-1">
+                Seller-Issued Customer Code <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-emerald-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. DSK-1001"
+                  value={inputCode}
+                  onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                  className="w-full pl-9 pr-3 py-2.5 text-base font-mono font-bold uppercase tracking-wider rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Found on your printed milk bill, monthly WhatsApp slip, or provided directly by Dr. Sanjay Kumar Dairy.
+              </p>
+            </div>
+
+            {linkError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{linkError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={linking}
+              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md shadow-emerald-700/20 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Link2 className="w-4 h-4" />
+              <span>{linking ? 'Verifying Code...' : 'Connect Milk Account'}</span>
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-slate-100 text-xs text-slate-400 flex items-center justify-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Strict Row-Level Isolation • Encrypted Sessions</span>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate customer ledger & current balance for the verified customer
   const ledger = calculateCustomerLedger(
     customerRecord.id,
     deliveries,
@@ -135,10 +229,18 @@ export default function CustomerPortalView({
       <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 mb-2">
-              <Milk className="w-3.5 h-3.5" />
-              Customer Milk Account Portal
-            </span>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                <Milk className="w-3.5 h-3.5" />
+                Customer Milk Account Portal
+              </span>
+              {customerRecord.customerCode && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold bg-white/10 text-emerald-200 border border-white/20">
+                  <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                  Code: {customerRecord.customerCode}
+                </span>
+              )}
+            </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
               Welcome, {customerRecord.name}!
             </h1>

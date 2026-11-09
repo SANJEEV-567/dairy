@@ -6,8 +6,10 @@ const CONFIG_STORAGE_KEY = 'dsk_dairy_supabase_config_v1';
  * Get Supabase configuration from environment variables or local overrides
  */
 export function getSupabaseConfig() {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const metaEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
+  const nodeEnv = typeof process !== 'undefined' && process.env ? process.env : {};
+  const envUrl = metaEnv.VITE_SUPABASE_URL || nodeEnv.VITE_SUPABASE_URL;
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || nodeEnv.VITE_SUPABASE_ANON_KEY;
 
   if (envUrl && envKey && !envUrl.includes('your-project-id')) {
     return {

@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Phone, MapPin, Milk, IndianRupee, FileText, AlertCircle } from 'lucide-react';
-import { roundToTwo } from '../utils/formatters';
+import { X, User, Phone, MapPin, Milk, IndianRupee, FileText, AlertCircle, KeyRound } from 'lucide-react';
+import { roundToTwo, generateCustomerCode } from '../utils/formatters';
 
 export default function CustomerModal({
   isOpen,
   customerToEdit = null,
+  customers = [],
   onSave,
   onClose
 }) {
   const [name, setName] = useState('');
+  const [customerCode, setCustomerCode] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [usualQuantityKg, setUsualQuantityKg] = useState('1.0');
@@ -22,6 +24,7 @@ export default function CustomerModal({
   useEffect(() => {
     if (customerToEdit) {
       setName(customerToEdit.name || '');
+      setCustomerCode(customerToEdit.customerCode || generateCustomerCode(customers));
       setPhone(customerToEdit.phone || '');
       setAddress(customerToEdit.address || '');
       setUsualQuantityKg((customerToEdit.usualQuantityKg || 1).toString());
@@ -31,6 +34,7 @@ export default function CustomerModal({
       setOpeningBalance('0'); // Existing customers already have their balance tracked in ledger
     } else {
       setName('');
+      setCustomerCode(generateCustomerCode(customers));
       setPhone('');
       setAddress('');
       setUsualQuantityKg('1.0');
@@ -40,7 +44,7 @@ export default function CustomerModal({
       setOpeningBalance('0');
     }
     setErrors({});
-  }, [customerToEdit, isOpen]);
+  }, [customerToEdit, isOpen, customers]);
 
   if (!isOpen) return null;
 
@@ -78,6 +82,7 @@ export default function CustomerModal({
     const customerData = {
       id: customerToEdit ? customerToEdit.id : undefined,
       name: name.trim(),
+      customerCode: (customerCode || generateCustomerCode(customers)).trim().toUpperCase(),
       phone: phone.trim(),
       address: address.trim(),
       usualQuantityKg: roundToTwo(parseFloat(usualQuantityKg)),
@@ -139,6 +144,29 @@ export default function CustomerModal({
               />
             </div>
             {errors.name && <p className="text-xs text-rose-500 mt-1">{errors.name}</p>}
+          </div>
+
+          {/* Seller-Issued Customer Code */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold uppercase text-slate-600">
+                Seller-Issued Customer Code <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[11px] text-slate-500 font-medium">
+                Buyer uses this code to view their deliveries
+              </span>
+            </div>
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-emerald-600 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                required
+                placeholder="e.g. DSK-1001"
+                value={customerCode}
+                onChange={(e) => setCustomerCode(e.target.value.toUpperCase())}
+                className="w-full pl-9 pr-3 py-2 text-sm font-mono font-bold uppercase tracking-wider rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:border-emerald-500 focus:ring-emerald-200"
+              />
+            </div>
           </div>
 
           {/* Phone & Address */}

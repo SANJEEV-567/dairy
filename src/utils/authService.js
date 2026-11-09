@@ -31,7 +31,7 @@ function normalizeAuthError(error) {
 /**
  * Sign up a new user (Seller or Customer) with real email & password
  */
-export async function signUpUser({ email, password, name, role = 'seller', phone = '', address = '', usualQuantityKg = 1.0 }) {
+export async function signUpUser({ email, password, name, role = 'seller', customerCode = '' }) {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
@@ -43,6 +43,7 @@ export async function signUpUser({ email, password, name, role = 'seller', phone
   const supabase = getSupabaseClient();
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = name.trim();
+  const cleanCode = customerCode ? customerCode.trim().toUpperCase() : '';
 
   try {
     const { data, error } = await supabase.auth.signUp({
@@ -52,9 +53,7 @@ export async function signUpUser({ email, password, name, role = 'seller', phone
         data: {
           name: cleanName,
           role: role,
-          phone: phone.trim(),
-          address: address.trim(),
-          usual_quantity_kg: Number(usualQuantityKg) || 1.0
+          customer_code: cleanCode
         }
       }
     });
@@ -65,7 +64,7 @@ export async function signUpUser({ email, password, name, role = 'seller', phone
 
     const user = data.user;
     const session = data.session;
-    // If confirmation is required, session will be null and confirmed_at will be null
+    // Real email verification check: only confirmed if provider explicitly confirms it
     const needsEmailVerification = Boolean(user && !user.confirmed_at && !session);
 
     return {
@@ -108,6 +107,7 @@ export async function signInUser({ email, password }) {
     const user = data.user;
     const role = user?.user_metadata?.role || 'seller';
     const name = user?.user_metadata?.name || user.email.split('@')[0];
+    const customerCode = user?.user_metadata?.customer_code || '';
 
     return {
       success: true,
@@ -116,8 +116,7 @@ export async function signInUser({ email, password }) {
         email: user.email,
         name: name,
         role: role,
-        phone: user?.user_metadata?.phone || '',
-        address: user?.user_metadata?.address || '',
+        customerCode: customerCode,
         avatar: user?.user_metadata?.avatar_url || null,
         emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
         provider: user.app_metadata?.provider || 'email'
@@ -258,8 +257,7 @@ export async function getActiveSession() {
       email: user.email,
       name: user?.user_metadata?.name || user.email.split('@')[0],
       role: user?.user_metadata?.role || 'seller',
-      phone: user?.user_metadata?.phone || '',
-      address: user?.user_metadata?.address || '',
+      customerCode: user?.user_metadata?.customer_code || '',
       avatar: user?.user_metadata?.avatar_url || null,
       emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
       provider: user.app_metadata?.provider || 'email'
@@ -267,6 +265,25 @@ export async function getActiveSession() {
   } catch (e) {
     console.error("Error retrieving session:", e);
     return null;
+  }
+}
+
+/**
+ * Link an authenticated customer user account to a dairy customer record using seller-issued code
+ */
+export async function linkCustomerAccountByCode(customerCode) {
+  if (!isSupabaseConfigured()) {
+    return { success: false, notConfigured: true, error: "Backend not connected." };
+  }
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase.rpc('link_customer_account', {
+      p_customer_code: customerCode.trim().toUpperCase()
+    });
+    if (error) return { success: false, error: normalizeAuthError(error) };
+    return data;
+  } catch (err) {
+    return { success: false, error: normalizeAuthError(err) };
   }
 }
 
@@ -285,8 +302,7 @@ export function subscribeToAuthChanges(callback) {
         email: user.email,
         name: user?.user_metadata?.name || user.email.split('@')[0],
         role: user?.user_metadata?.role || 'seller',
-        phone: user?.user_metadata?.phone || '',
-        address: user?.user_metadata?.address || '',
+        customerCode: user?.user_metadata?.customer_code || '',
         avatar: user?.user_metadata?.avatar_url || null,
         emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
         provider: user.app_metadata?.provider || 'email'

@@ -21,15 +21,18 @@ import {
   saveToStorage, 
   generateId,
   getScopedKey,
-  migrateLegacyRecordsToAccount 
+  migrateLegacyRecordsToAccount,
+  linkCustomerAccountLocally,
+  getLinkedCustomerData
 } from './utils/storage';
 import { STORAGE_KEYS } from './utils/constants';
 import { getCustomerBalance } from './utils/calculations';
-import { roundToTwo, getTodayKolkata } from './utils/formatters';
+import { roundToTwo, getTodayKolkata, generateCustomerCode } from './utils/formatters';
 import { 
   getActiveSession, 
   subscribeToAuthChanges, 
-  signOutUser 
+  signOutUser,
+  linkCustomerAccountByCode
 } from './utils/authService';
 
 export default function App() {
@@ -120,6 +123,32 @@ export default function App() {
     };
   }, []);
 
+  // Helper to load customer records for linked customer account
+  const loadCustomerData = (userId, customCode = null) => {
+    let linked = getLinkedCustomerData(userId);
+    const codeToTry = customCode || currentUser?.customerCode;
+
+    // If not linked yet, but customerCode exists, attempt auto-linking
+    if (!linked && codeToTry) {
+      linkCustomerAccountLocally(codeToTry, userId);
+      linked = getLinkedCustomerData(userId);
+    }
+
+    if (linked && linked.customer) {
+      setCustomers([linked.customer]);
+      setDeliveries(linked.deliveries || []);
+      setPayments(linked.payments || []);
+      setAdjustments(linked.adjustments || []);
+      setStatusOverrides(linked.statusOverrides || []);
+    } else {
+      setCustomers([]);
+      setDeliveries([]);
+      setPayments([]);
+      setAdjustments([]);
+      setStatusOverrides([]);
+    }
+  };
+
   // 2. Load and Sync Account-Scoped Records whenever currentUser changes
   useEffect(() => {
     if (!currentUser?.id) {
@@ -133,6 +162,13 @@ export default function App() {
 
     const userId = currentUser.id;
 
+    // Handle Customer Portal Session
+    if (currentUser.role === 'customer') {
+      loadCustomerData(userId);
+      return;
+    }
+
+    // Handle Seller Portal Session
     // Migrate any legacy unassigned records to this authenticated dairy account
     const migrationResult = migrateLegacyRecordsToAccount(userId);
     if (migrationResult.migrated) {
@@ -146,43 +182,61 @@ export default function App() {
     const scopedAdj = loadFromStorage(getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId), []);
     const scopedOvr = loadFromStorage(getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId), []);
 
-    setCustomers(scopedCust);
+    // Ensure all existing customers have a unique customerCode
+    const existingCodes = [];
+    let codesUpdated = false;
+    const withCodes = scopedCust.map(c => {
+      if (!c.customerCode) {
+        const code = generateCustomerCode(existingCodes);
+        existingCodes.push({ customerCode: code });
+        codesUpdated = true;
+        return { ...c, customerCode: code };
+      }
+      existingCodes.push({ customerCode: c.customerCode });
+      return c;
+    });
+
+    if (codesUpdated) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, userId), withCodes);
+    }
+
+    setCustomers(withCodes);
     setDeliveries(scopedDeliv);
     setPayments(scopedPay);
     setAdjustments(scopedAdj);
     setStatusOverrides(scopedOvr);
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.role]);
 
-  // Sync to account-scoped storage whenever state updates
+  // Sync to account-scoped storage whenever seller state updates
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role === 'seller') {
       saveToStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, currentUser.id), customers);
     }
-  }, [customers, currentUser?.id]);
+  }, [customers, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role === 'seller') {
       saveToStorage(getScopedKey(STORAGE_KEYS.DELIVERIES, currentUser.id), deliveries);
     }
-  }, [deliveries, currentUser?.id]);
+  }, [deliveries, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role === 'seller') {
       saveToStorage(getScopedKey(STORAGE_KEYS.PAYMENTS, currentUser.id), payments);
     }
-  }, [payments, currentUser?.id]);
+  }, [payments, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role === 'seller') {
       saveToStorage(getScopedKey(STORAGE_KEYS.ADJUSTMENTS, currentUser.id), adjustments);
     }
-  }, [adjustments, currentUser?.id]);
+  }, [adjustments, currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser?.id && currentUser.role === 'seller') {
       saveToStorage(getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, currentUser.id), statusOverrides);
     }
-  }, [statusOverrides, currentUser?.id]);
+  }, [statusOverrides, currentUser?.id, currentUser?.role]);
 
   // Reload data for account
   const handleDataReloaded = () => {
@@ -201,6 +255,61 @@ export default function App() {
     showToast("Signed out successfully.");
   };
 
+  // Link customer account to dairy records via seller-issued code
+  const handleLinkCustomerAccount = async (code) => {
+    if (!currentUser?.id) return { success: false, error: "You must be signed in." };
+
+    const cleanCode = code.trim().toUpperCase();
+
+    // 1. Link in local storage
+    const localRes = linkCustomerAccountLocally(cleanCode, currentUser.id);
+
+    // 2. Also link via Supabase RPC if configured
+    try {
+      await linkCustomerAccountByCode(cleanCode);
+    } catch (e) {
+      // Non-blocking for offline/local mode
+    }
+
+    if (localRes.success) {
+      setCurrentUser(prev => ({ ...prev, customerCode: cleanCode }));
+      loadCustomerData(currentUser.id, cleanCode);
+      return { success: true, customerName: localRes.customer.name };
+    }
+
+    return { 
+      success: false, 
+      error: localRes.error || "Customer code not recognized. Check with Dr. Sanjay Kumar Dairy." 
+    };
+  };
+
+  // Handle payment submitted by customer in Customer Portal
+  const handleCustomerPaymentSubmit = (paymentData) => {
+    const cust = customers[0];
+    const newPayment = {
+      id: generateId('pay'),
+      dairy_id: cust?.dairy_id || null,
+      customerId: cust?.id || paymentData.customerId,
+      amount: roundToTwo(parseFloat(paymentData.amount)),
+      date: paymentData.date,
+      time: paymentData.time,
+      paymentMethod: paymentData.paymentMethod || 'UPI',
+      note: paymentData.note || '',
+      createdAt: new Date().toISOString()
+    };
+
+    // Update customer portal state
+    setPayments(prev => [newPayment, ...prev]);
+
+    // Save to the dairy seller's payment records in storage
+    const dairyId = cust?.dairy_id;
+    if (dairyId) {
+      const sellerPayKey = getScopedKey(STORAGE_KEYS.PAYMENTS, dairyId);
+      const existingPay = loadFromStorage(sellerPayKey, []);
+      saveToStorage(sellerPayKey, [newPayment, ...existingPay]);
+    }
+  };
+
   // ----------------------------------------------------
   // Customer Handlers
   // ----------------------------------------------------
@@ -212,6 +321,7 @@ export default function App() {
             return {
               ...c,
               name: customerData.name,
+              customerCode: customerData.customerCode || c.customerCode || generateCustomerCode(customers),
               phone: customerData.phone,
               address: customerData.address,
               usualQuantityKg: customerData.usualQuantityKg,
@@ -226,10 +336,12 @@ export default function App() {
         showToast(`Customer "${customerData.name}" updated successfully.`);
       } else {
         const newId = generateId('cust');
+        const code = customerData.customerCode || generateCustomerCode(customers);
         const newCustomer = {
           id: newId,
           dairy_id: currentUser?.id,
           name: customerData.name,
+          customerCode: code,
           phone: customerData.phone,
           address: customerData.address,
           usualQuantityKg: customerData.usualQuantityKg,
@@ -619,7 +731,8 @@ export default function App() {
             payments={payments}
             adjustments={adjustments}
             statusOverrides={statusOverrides}
-            onCustomerPaymentSubmit={handleSavePayment}
+            onLinkAccount={handleLinkCustomerAccount}
+            onCustomerPaymentSubmit={handleCustomerPaymentSubmit}
             showToast={showToast}
           />
         </main>
@@ -660,6 +773,7 @@ export default function App() {
       <CustomerModal
         isOpen={customerModalOpen}
         customerToEdit={customerToEdit}
+        customers={customers}
         onSave={handleSaveCustomer}
         onClose={() => {
           setCustomerModalOpen(false);

@@ -1,4 +1,7 @@
 import { STORAGE_KEYS } from './constants.js';
+import { generateCustomerCode } from './formatters.js';
+
+export const CUSTOMER_LINK_KEY_PREFIX = 'dsk_dairy_customer_link_';
 
 /**
  * Generate account-scoped storage key for user data isolation
@@ -69,8 +72,13 @@ export function migrateLegacyRecordsToAccount(userId) {
     return { migrated: false, noLegacyRecords: true };
   }
 
-  // Assign dairy_id to legacy records
-  const migratedCust = legacyCustomers.map(c => ({ ...c, dairy_id: userId }));
+  // Assign dairy_id and ensure unique customer_code to legacy records
+  const existingCodes = [];
+  const migratedCust = legacyCustomers.map((c, idx) => {
+    const code = c.customerCode || generateCustomerCode(existingCodes);
+    existingCodes.push({ customerCode: code });
+    return { ...c, dairy_id: userId, customerCode: code };
+  });
   const migratedDeliv = legacyDeliveries.map(d => ({ ...d, dairy_id: userId }));
   const migratedPay = legacyPayments.map(p => ({ ...p, dairy_id: userId }));
   const migratedAdj = legacyAdjustments.map(a => ({ ...a, dairy_id: userId }));
@@ -88,6 +96,136 @@ export function migrateLegacyRecordsToAccount(userId) {
       payments: migratedPay.length,
       adjustments: migratedAdj.length
     }
+  };
+}
+
+/**
+ * Locate a customer record across dairy storage by unique customer code
+ */
+export function findCustomerByCode(customerCode) {
+  if (!customerCode) return null;
+  const cleanCode = customerCode.trim().toUpperCase();
+
+  // 1. Search in localStorage keys
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(STORAGE_KEYS.CUSTOMERS)) {
+        const custList = loadFromStorage(key, []);
+        const found = custList.find(c => c?.customerCode?.toUpperCase() === cleanCode);
+        if (found) {
+          const dairyId = found.dairy_id || key.replace(`${STORAGE_KEYS.CUSTOMERS}_`, '');
+          return { customer: found, dairyId, key };
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Error searching customer by code:", e);
+  }
+
+  // 2. Check unassigned legacy customers key
+  const unassigned = loadFromStorage(STORAGE_KEYS.CUSTOMERS, []);
+  const foundUnassigned = unassigned.find(c => c?.customerCode?.toUpperCase() === cleanCode);
+  if (foundUnassigned) {
+    return { customer: foundUnassigned, dairyId: null, key: STORAGE_KEYS.CUSTOMERS };
+  }
+
+  return null;
+}
+
+/**
+ * Link customer user account to a dairy customer record locally
+ */
+export function linkCustomerAccountLocally(customerCode, userAuthId) {
+  if (!customerCode || !userAuthId) {
+    return { success: false, error: "Customer code and User ID are required." };
+  }
+
+  const result = findCustomerByCode(customerCode);
+  if (!result || !result.customer) {
+    return {
+      success: false,
+      error: "Invalid customer code. Please verify the code on your milk bill or ask Dr. Sanjay Kumar Dairy."
+    };
+  }
+
+  const { customer, dairyId, key } = result;
+
+  // Check if already claimed by another user
+  if (customer.linkedUserId && customer.linkedUserId !== userAuthId) {
+    return {
+      success: false,
+      error: "This customer code is already connected to another user account. Contact Dr. Sanjay Kumar Dairy for assistance."
+    };
+  }
+
+  // Update customer record
+  const custList = loadFromStorage(key, []);
+  const updatedCustList = custList.map(c => 
+    c.id === customer.id ? { ...c, linkedUserId: userAuthId, updatedAt: new Date().toISOString() } : c
+  );
+  saveToStorage(key, updatedCustList);
+
+  // Save the customer link pointer
+  const linkKey = `${CUSTOMER_LINK_KEY_PREFIX}${userAuthId}`;
+  saveToStorage(linkKey, {
+    customerId: customer.id,
+    dairyId: dairyId || customer.dairy_id || null,
+    customerCode: customer.customerCode,
+    customerName: customer.name,
+    linkedAt: new Date().toISOString()
+  });
+
+  return {
+    success: true,
+    customer: { ...customer, linkedUserId: userAuthId },
+    dairyId
+  };
+}
+
+/**
+ * Get linked customer data for a logged-in customer account
+ * STRICT DATA ISOLATION: Only returns the customer's OWN deliveries, payments, and adjustments
+ */
+export function getLinkedCustomerData(userAuthId) {
+  if (!userAuthId) return null;
+  const linkKey = `${CUSTOMER_LINK_KEY_PREFIX}${userAuthId}`;
+  const link = loadFromStorage(linkKey, null);
+
+  if (!link || !link.customerId) {
+    return null;
+  }
+
+  const { customerId, dairyId } = link;
+  const custKey = dairyId ? getScopedKey(STORAGE_KEYS.CUSTOMERS, dairyId) : STORAGE_KEYS.CUSTOMERS;
+  const delivKey = dairyId ? getScopedKey(STORAGE_KEYS.DELIVERIES, dairyId) : STORAGE_KEYS.DELIVERIES;
+  const payKey = dairyId ? getScopedKey(STORAGE_KEYS.PAYMENTS, dairyId) : STORAGE_KEYS.PAYMENTS;
+  const adjKey = dairyId ? getScopedKey(STORAGE_KEYS.ADJUSTMENTS, dairyId) : STORAGE_KEYS.ADJUSTMENTS;
+  const ovrKey = dairyId ? getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, dairyId) : STORAGE_KEYS.STATUS_OVERRIDES;
+
+  const customers = loadFromStorage(custKey, []);
+  const customer = customers.find(c => c.id === customerId);
+
+  if (!customer) return null;
+
+  // STRICT FILTER: Only deliveries and records belonging to this customer
+  const allDeliveries = loadFromStorage(delivKey, []);
+  const allPayments = loadFromStorage(payKey, []);
+  const allAdjustments = loadFromStorage(adjKey, []);
+  const allOverrides = loadFromStorage(ovrKey, []);
+
+  const myDeliveries = allDeliveries.filter(d => d.customerId === customerId);
+  const myPayments = allPayments.filter(p => p.customerId === customerId);
+  const myAdjustments = allAdjustments.filter(a => a.customerId === customerId);
+  const myOverrides = allOverrides.filter(o => o.customerId === customerId);
+
+  return {
+    customer,
+    dairyId,
+    deliveries: myDeliveries,
+    payments: myPayments,
+    adjustments: myAdjustments,
+    statusOverrides: myOverrides
   };
 }
 
