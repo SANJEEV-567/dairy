@@ -36,7 +36,7 @@ import {
   findCustomerByCode
 } from './src/utils/storage.js';
 import { isSupabaseConfigured } from './src/utils/supabase.js';
-import { signUpUser, signInUser, sendPasswordResetEmail } from './src/utils/authService.js';
+import { signUpUser, signInUser, sendPasswordResetEmail, signInWithGoogleOAuth } from './src/utils/authService.js';
 
 console.log("Starting verification test suite for Dr. Sanjay Kumar Dairy...");
 
@@ -185,6 +185,10 @@ async function testAuthSafety() {
   const resetRes = await sendPasswordResetEmail('seller@test.com');
   assert.strictEqual(resetRes.success, false, "sendPasswordResetEmail must fail when backend unconfigured");
   assert.strictEqual(resetRes.notConfigured, true, "Must flag notConfigured as true");
+
+  const googleOAuthRes = await signInWithGoogleOAuth('seller');
+  assert.strictEqual(googleOAuthRes.success, false, "signInWithGoogleOAuth must fail when backend unconfigured");
+  assert.strictEqual(googleOAuthRes.notConfigured, true, "Must flag notConfigured as true");
 }
 await testAuthSafety();
 

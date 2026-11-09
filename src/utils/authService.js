@@ -131,7 +131,7 @@ export async function signInUser({ email, password }) {
 /**
  * Sign in using Google OAuth through Supabase
  */
-export async function signInWithGoogleOAuth(role = 'seller') {
+export async function signInWithGoogleOAuth(role = 'seller', customerCode = '') {
   if (!isSupabaseConfigured()) {
     return {
       success: false,
@@ -143,6 +143,13 @@ export async function signInWithGoogleOAuth(role = 'seller') {
   const supabase = getSupabaseClient();
 
   try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.setItem('dsk_pending_auth_role', role);
+      if (customerCode) {
+        sessionStorage.setItem('dsk_pending_customer_code', customerCode.trim().toUpperCase());
+      }
+    }
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -159,6 +166,60 @@ export async function signInWithGoogleOAuth(role = 'seller') {
     }
 
     return { success: true, data };
+  } catch (err) {
+    return { success: false, error: normalizeAuthError(err) };
+  }
+}
+
+/**
+ * Sign in using Google ID Token / Credential from Google Identity Services API
+ */
+export async function signInWithGoogleCredential(idToken, role = 'seller', customerCode = '') {
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      notConfigured: true,
+      error: "Authentication backend is not connected."
+    };
+  }
+
+  const supabase = getSupabaseClient();
+
+  try {
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: idToken
+    });
+
+    if (error) {
+      return { success: false, error: normalizeAuthError(error) };
+    }
+
+    const user = data.user;
+    let userRole = user?.user_metadata?.role || role;
+    let code = user?.user_metadata?.customer_code || customerCode;
+
+    // Save metadata if not present
+    if (!user?.user_metadata?.role) {
+      await supabase.auth.updateUser({
+        data: { role: userRole, customer_code: code }
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0],
+        role: userRole,
+        customerCode: code || '',
+        avatar: user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null,
+        emailConfirmed: true,
+        provider: 'google'
+      },
+      session: data.session
+    };
   } catch (err) {
     return { success: false, error: normalizeAuthError(err) };
   }
@@ -252,14 +313,38 @@ export async function getActiveSession() {
     if (!data?.session?.user) return null;
 
     const user = data.session.user;
+    let role = user?.user_metadata?.role;
+    let customerCode = user?.user_metadata?.customer_code;
+
+    // Check if there was a pending role/code from Google OAuth redirect
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const pendingRole = sessionStorage.getItem('dsk_pending_auth_role');
+      const pendingCode = sessionStorage.getItem('dsk_pending_customer_code');
+
+      if (pendingRole && (!role || role !== pendingRole)) {
+        role = pendingRole;
+        supabase.auth.updateUser({ data: { role: pendingRole } }).catch(() => {});
+      }
+      if (pendingCode && !customerCode) {
+        customerCode = pendingCode;
+        supabase.auth.updateUser({ data: { customer_code: pendingCode } }).catch(() => {});
+      }
+      sessionStorage.removeItem('dsk_pending_auth_role');
+      sessionStorage.removeItem('dsk_pending_customer_code');
+    }
+
+    const isGoogle = user.app_metadata?.provider === 'google';
+    const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0];
+    const avatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+
     return {
       id: user.id,
       email: user.email,
-      name: user?.user_metadata?.name || user.email.split('@')[0],
-      role: user?.user_metadata?.role || 'seller',
-      customerCode: user?.user_metadata?.customer_code || '',
-      avatar: user?.user_metadata?.avatar_url || null,
-      emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
+      name: displayName,
+      role: role || 'seller',
+      customerCode: customerCode || '',
+      avatar: avatar,
+      emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at || isGoogle),
       provider: user.app_metadata?.provider || 'email'
     };
   } catch (e) {
@@ -297,14 +382,28 @@ export function subscribeToAuthChanges(callback) {
   const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
     if (session?.user) {
       const user = session.user;
+      let role = user?.user_metadata?.role;
+      let customerCode = user?.user_metadata?.customer_code;
+
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const pendingRole = sessionStorage.getItem('dsk_pending_auth_role');
+        const pendingCode = sessionStorage.getItem('dsk_pending_customer_code');
+        if (pendingRole && !role) role = pendingRole;
+        if (pendingCode && !customerCode) customerCode = pendingCode;
+      }
+
+      const isGoogle = user.app_metadata?.provider === 'google';
+      const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0];
+      const avatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+
       callback(event, {
         id: user.id,
         email: user.email,
-        name: user?.user_metadata?.name || user.email.split('@')[0],
-        role: user?.user_metadata?.role || 'seller',
-        customerCode: user?.user_metadata?.customer_code || '',
-        avatar: user?.user_metadata?.avatar_url || null,
-        emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
+        name: displayName,
+        role: role || 'seller',
+        customerCode: customerCode || '',
+        avatar: avatar,
+        emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at || isGoogle),
         provider: user.app_metadata?.provider || 'email'
       });
     } else {
