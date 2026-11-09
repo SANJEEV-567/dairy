@@ -1,6 +1,14 @@
 import { STORAGE_KEYS } from './constants.js';
 
 /**
+ * Generate account-scoped storage key for user data isolation
+ */
+export function getScopedKey(baseKey, userId) {
+  if (!userId) return baseKey;
+  return `${baseKey}_${userId}`;
+}
+
+/**
  * Safe local storage reader
  */
 export function loadFromStorage(key, defaultValue = []) {
@@ -35,18 +43,74 @@ export function generateId(prefix = 'id') {
 }
 
 /**
- * Export all system data as a single backup JSON file
+ * Migrate unassigned legacy records to an authenticated account
+ * Ensures zero data loss when setting up authentication on existing dairy records!
  */
-export function exportAllData() {
+export function migrateLegacyRecordsToAccount(userId) {
+  if (!userId) return { migrated: false };
+
+  const scopedCustKey = getScopedKey(STORAGE_KEYS.CUSTOMERS, userId);
+  const scopedDeliveriesKey = getScopedKey(STORAGE_KEYS.DELIVERIES, userId);
+  const scopedPaymentsKey = getScopedKey(STORAGE_KEYS.PAYMENTS, userId);
+  const scopedAdjustmentsKey = getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId);
+
+  const existingScopedCust = loadFromStorage(scopedCustKey, []);
+  if (existingScopedCust.length > 0) {
+    return { migrated: false, alreadyHasRecords: true };
+  }
+
+  // Check legacy unassigned records
+  const legacyCustomers = loadFromStorage(STORAGE_KEYS.CUSTOMERS, []);
+  const legacyDeliveries = loadFromStorage(STORAGE_KEYS.DELIVERIES, []);
+  const legacyPayments = loadFromStorage(STORAGE_KEYS.PAYMENTS, []);
+  const legacyAdjustments = loadFromStorage(STORAGE_KEYS.ADJUSTMENTS, []);
+
+  if (legacyCustomers.length === 0 && legacyDeliveries.length === 0) {
+    return { migrated: false, noLegacyRecords: true };
+  }
+
+  // Assign dairy_id to legacy records
+  const migratedCust = legacyCustomers.map(c => ({ ...c, dairy_id: userId }));
+  const migratedDeliv = legacyDeliveries.map(d => ({ ...d, dairy_id: userId }));
+  const migratedPay = legacyPayments.map(p => ({ ...p, dairy_id: userId }));
+  const migratedAdj = legacyAdjustments.map(a => ({ ...a, dairy_id: userId }));
+
+  saveToStorage(scopedCustKey, migratedCust);
+  saveToStorage(scopedDeliveriesKey, migratedDeliv);
+  saveToStorage(scopedPaymentsKey, migratedPay);
+  saveToStorage(scopedAdjustmentsKey, migratedAdj);
+
+  return {
+    migrated: true,
+    stats: {
+      customers: migratedCust.length,
+      deliveries: migratedDeliv.length,
+      payments: migratedPay.length,
+      adjustments: migratedAdj.length
+    }
+  };
+}
+
+/**
+ * Export all system data for an account as a single backup JSON file
+ */
+export function exportAllData(userId = null) {
+  const custKey = getScopedKey(STORAGE_KEYS.CUSTOMERS, userId);
+  const delivKey = getScopedKey(STORAGE_KEYS.DELIVERIES, userId);
+  const payKey = getScopedKey(STORAGE_KEYS.PAYMENTS, userId);
+  const adjKey = getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId);
+  const ovrKey = getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId);
+
   const data = {
     appName: "Dr. Sanjay Kumar Dairy Management System",
     exportedAt: new Date().toISOString(),
-    version: 1,
-    customers: loadFromStorage(STORAGE_KEYS.CUSTOMERS, []),
-    deliveries: loadFromStorage(STORAGE_KEYS.DELIVERIES, []),
-    payments: loadFromStorage(STORAGE_KEYS.PAYMENTS, []),
-    adjustments: loadFromStorage(STORAGE_KEYS.ADJUSTMENTS, []),
-    statusOverrides: loadFromStorage(STORAGE_KEYS.STATUS_OVERRIDES, []),
+    version: 2,
+    userId: userId || null,
+    customers: loadFromStorage(custKey, []),
+    deliveries: loadFromStorage(delivKey, []),
+    payments: loadFromStorage(payKey, []),
+    adjustments: loadFromStorage(adjKey, []),
+    statusOverrides: loadFromStorage(ovrKey, []),
     settings: loadFromStorage(STORAGE_KEYS.SETTINGS, {})
   };
   return JSON.stringify(data, null, 2);
@@ -55,7 +119,7 @@ export function exportAllData() {
 /**
  * Import and validate backup JSON data
  */
-export function importAllData(jsonString) {
+export function importAllData(jsonString, userId = null) {
   try {
     const parsed = JSON.parse(jsonString);
     if (!parsed || typeof parsed !== 'object') {
@@ -70,12 +134,18 @@ export function importAllData(jsonString) {
     const statusOverrides = Array.isArray(parsed.statusOverrides) ? parsed.statusOverrides : [];
     const settings = parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {};
 
-    // Save to localStorage
-    saveToStorage(STORAGE_KEYS.CUSTOMERS, customers);
-    saveToStorage(STORAGE_KEYS.DELIVERIES, deliveries);
-    saveToStorage(STORAGE_KEYS.PAYMENTS, payments);
-    saveToStorage(STORAGE_KEYS.ADJUSTMENTS, adjustments);
-    saveToStorage(STORAGE_KEYS.STATUS_OVERRIDES, statusOverrides);
+    const custKey = getScopedKey(STORAGE_KEYS.CUSTOMERS, userId);
+    const delivKey = getScopedKey(STORAGE_KEYS.DELIVERIES, userId);
+    const payKey = getScopedKey(STORAGE_KEYS.PAYMENTS, userId);
+    const adjKey = getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId);
+    const ovrKey = getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId);
+
+    // Save to account-scoped keys
+    saveToStorage(custKey, customers);
+    saveToStorage(delivKey, deliveries);
+    saveToStorage(payKey, payments);
+    saveToStorage(adjKey, adjustments);
+    saveToStorage(ovrKey, statusOverrides);
     saveToStorage(STORAGE_KEYS.SETTINGS, settings);
 
     return {
@@ -96,10 +166,18 @@ export function importAllData(jsonString) {
 }
 
 /**
- * Clear all data safely
+ * Clear all data safely for an account
  */
-export function clearAllData() {
-  Object.values(STORAGE_KEYS).forEach(key => {
+export function clearAllData(userId = null) {
+  const keys = [
+    getScopedKey(STORAGE_KEYS.CUSTOMERS, userId),
+    getScopedKey(STORAGE_KEYS.DELIVERIES, userId),
+    getScopedKey(STORAGE_KEYS.PAYMENTS, userId),
+    getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId),
+    getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId)
+  ];
+
+  keys.forEach(key => {
     localStorage.removeItem(key);
   });
 }

@@ -128,7 +128,7 @@ export default function CustomerModal({
               <input
                 type="text"
                 required
-                placeholder="e.g. Ramesh Sharma"
+                placeholder="Enter customer full name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className={`w-full pl-9 pr-3 py-2 text-sm rounded-xl border focus:outline-none focus:ring-2 ${

@@ -22,14 +22,10 @@ import {
   generateMonthlyBill, 
   getDailyDashboardMetrics 
 } from './src/utils/calculations.js';
-import { BILL_STATUS } from './src/utils/constants.js';
-import { 
-  loginWithEmail, 
-  registerAccount, 
-  loginWithGoogleAuth, 
-  logout, 
-  getCurrentUser 
-} from './src/utils/auth.js';
+import { BILL_STATUS, STORAGE_KEYS } from './src/utils/constants.js';
+import { getScopedKey, migrateLegacyRecordsToAccount, saveToStorage, loadFromStorage } from './src/utils/storage.js';
+import { isSupabaseConfigured } from './src/utils/supabase.js';
+import { signUpUser, signInUser, sendPasswordResetEmail } from './src/utils/authService.js';
 
 console.log("Starting verification test suite for Dr. Sanjay Kumar Dairy...");
 
@@ -80,7 +76,7 @@ assert.strictEqual(ledger.transactions.length, 6, "Must contain all 6 transactio
 // Test 6: Monthly Bill Generation for November 2026
 const customerObj = {
   id: testCustomerId,
-  name: "Ramesh Test",
+  name: "Test Customer A",
   phone: "9876543210",
   address: "Test Address",
   usualQuantityKg: 1.5,
@@ -146,34 +142,39 @@ const inactDeliveries = [{ id: "id1", customerId: "cust_inact", date: "2026-11-0
 const inactDashboard = getDailyDashboardMetrics("2026-11-01", [customerObj, inactiveCust], [...deliveries, ...inactDeliveries], payments, adjustments);
 assert.strictEqual(inactDashboard.totalOutstandingDue, 250 + 300, "Total outstanding due must include inactive customer with balance");
 
-// Test 13: Seller Email Authentication
-const sellerLogin = loginWithEmail('drsanjay@dairy.com', 'dairy123', 'seller');
-assert.strictEqual(sellerLogin.success, true, "Seller login with default credentials must succeed");
-assert.strictEqual(sellerLogin.user.role, 'seller', "Seller role must be 'seller'");
+// Test 13: Data Isolation - getScopedKey generates distinct keys for each authenticated account
+const scopedKeyA = getScopedKey(STORAGE_KEYS.CUSTOMERS, 'seller_user_A');
+const scopedKeyB = getScopedKey(STORAGE_KEYS.CUSTOMERS, 'seller_user_B');
+assert.notStrictEqual(scopedKeyA, scopedKeyB, "Scoped keys for different sellers must not collide");
+assert.strictEqual(scopedKeyA, `${STORAGE_KEYS.CUSTOMERS}_seller_user_A`);
 
-// Test 14: Customer Registration & Login
-const custReg = registerAccount({
-  name: 'Suresh Kumar',
-  email: 'suresh@test.com',
-  password: 'password123',
-  role: 'customer',
-  phone: '9876500000',
-  usualQuantityKg: 2.0
-});
-assert.strictEqual(custReg.success, true, "Customer registration must succeed");
-assert.strictEqual(custReg.user.role, 'customer', "Role must be 'customer'");
+// Test 14: Data Migration - safely assigns unassigned legacy records to authenticated account
+saveToStorage(STORAGE_KEYS.CUSTOMERS, [{ id: "legacy_c1", name: "Legacy Cust" }]);
+saveToStorage(STORAGE_KEYS.DELIVERIES, [{ id: "legacy_d1", charge: 60 }]);
+const migrationResult = migrateLegacyRecordsToAccount('authenticated_seller_uuid');
+assert.strictEqual(migrationResult.migrated, true, "Legacy records must be successfully migrated");
+const migratedCust = loadFromStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, 'authenticated_seller_uuid'), []);
+assert.strictEqual(migratedCust.length, 1, "Migrated records must be stored under scoped key");
+assert.strictEqual(migratedCust[0].dairy_id, 'authenticated_seller_uuid', "Migrated records must receive authenticated dairy_id");
 
-// Test 15: Google Sign-In for Customer
-const googleLogin = loginWithGoogleAuth({
-  name: 'Google User',
-  email: 'googleuser@gmail.com',
-  picture: 'https://example.com/pic.jpg'
-}, 'customer');
-assert.strictEqual(googleLogin.success, true, "Google login for customer must succeed");
-assert.strictEqual(googleLogin.user.provider, 'google', "Provider must be google");
+// Test 15: Security Gate - isSupabaseConfigured returns false when backend is unconfigured
+assert.strictEqual(isSupabaseConfigured(), false, "isSupabaseConfigured must be false when no valid URL/anonKey provided");
 
-// Test 16: Logout
-logout();
-assert.strictEqual(getCurrentUser(), null, "Current user must be null after logout");
+// Test 16: Safe Rejection - Auth methods refuse to simulate logins when unconfigured
+async function testAuthSafety() {
+  const signUpRes = await signUpUser({ email: 'seller@test.com', password: 'password123', name: 'Seller' });
+  assert.strictEqual(signUpRes.success, false, "signUpUser must fail when backend unconfigured");
+  assert.strictEqual(signUpRes.notConfigured, true, "Must flag notConfigured as true");
+
+  const signInRes = await signInUser({ email: 'seller@test.com', password: 'password123' });
+  assert.strictEqual(signInRes.success, false, "signInUser must fail when backend unconfigured");
+  assert.strictEqual(signInRes.notConfigured, true, "Must flag notConfigured as true");
+
+  const resetRes = await sendPasswordResetEmail('seller@test.com');
+  assert.strictEqual(resetRes.success, false, "sendPasswordResetEmail must fail when backend unconfigured");
+  assert.strictEqual(resetRes.notConfigured, true, "Must flag notConfigured as true");
+}
+
+await testAuthSafety();
 
 console.log("All 16 calculation, business workflow, and authentication tests passed cleanly!");

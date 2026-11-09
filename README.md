@@ -2,17 +2,18 @@
 
 A responsive, production-ready Milk Business Management and Monthly Billing web application designed specifically for the dairy seller **Dr. Sanjay Kumar Dairy** and their **Milk Customers**.
 
-Built strictly to real-world business requirements with **persistent storage, role-based authentication (Seller & Customer), email/password login, Google sign-in, and exact financial calculations**.
+Built strictly to real-world business requirements with **account-scoped persistent storage, real role-based authentication (Seller & Customer), email/password login, Google OAuth, password recovery, and exact financial calculations**.
 
 ---
 
-## 🔐 Authentication System (Seller & Customer)
+## 🔐 Real Authentication Architecture (Seller & Customer)
 
-The application provides dual login and registration options:
+Authentication is powered by a real identity provider (Supabase Auth) with client-side verification gates and database Row-Level Security (RLS). **No plaintext passwords or browser-stored credentials exist.**
 
 ### 1. Seller Portal (Dairy Owner)
-- **Email & Password Login**: Pre-seeded with `drsanjay@dairy.com` / `dairy123` (or register a custom seller account).
-- **Continue with Google**: One-click Google sign-in with Dr. Sanjay Kumar profile or any custom Google account.
+- **Email & Password Login & Registration**: Dairy owners register and log in with their official email and secure password. Passwords are never stored in plaintext and are securely hashed and authenticated via Supabase.
+- **Continue with Google**: Direct Google OAuth identity provider integration.
+- **Password Reset**: "Forgot password?" sends real reset instructions to the registered email with token verification.
 - **Capabilities**:
   - Full daily operations dashboard & metrics
   - Quick daily milk entry sheet (batch logging, 0 kg absent handling)
@@ -23,14 +24,24 @@ The application provides dual login and registration options:
   - Data backup & restore (JSON export/import)
 
 ### 2. Customer Portal (Milk Buyer)
-- **Email & Password Login / Register**: Quick sign up with name, email, password, phone, delivery address, and preferred daily milk quantity in kg. Automatically links or creates an active record in the dairy's customer directory!
-- **Continue with Google**: Instant Google sign-in.
+- **Email & Password Sign Up & Login**: Customers register with their full name, email, password, phone, delivery address, and preferred daily milk quantity in kg.
+- **Continue with Google**: Secure Google OAuth authentication.
 - **Capabilities**:
   - Live account balance (Amount Due or Advance Credit)
   - Daily milk delivery log (date, time, kg, rate, daily charge)
   - Monthly bills with itemized delivery line-items & printable invoice
   - Transaction ledger statement with running balance
-  - Online UPI payment assistant (scan QR code for `drsanjay.dairy@upi`, pre-filled amount, and submit UTR reference)
+  - Online UPI payment assistant (scan QR code, pre-filled amount, and submit UTR reference)
+
+---
+
+## 🛡️ Security, Access Control & Data Isolation
+
+1. **Authentication Gate**: Sign-in is strictly required before accessing any customer, delivery, payment, ledger, or bill data.
+2. **Account Scoping**: Data is scoped per dairy account (`dairy_id`). Users can only access records associated with their authenticated account.
+3. **Database RLS Policies**: Defined in `supabase-schema.sql` ensuring database-enforced row isolation for `profiles`, `customers`, `deliveries`, `payments`, and `adjustments`.
+4. **Safe Data Migration**: Any unassigned legacy local records are seamlessly migrated to the authenticated account upon first login, ensuring zero data loss.
+5. **Real Error Handling & Verification**: Invalid credentials, unverified emails, weak passwords, and unconfigured backends are caught and displayed clearly with readable error alerts.
 
 ---
 
@@ -42,8 +53,9 @@ The application provides dual login and registration options:
 - **Safe Deactivation**: Inactive customers are hidden from the daily entry sheet while keeping their complete transaction ledger and billing history fully intact.
 
 ### 2. Daily Milk Recording
-- **Quick Entry Screen**: Displays all active customers for any selected date (Asia/Kolkata timezone).
-- **Auto Calculation**: $\text{Daily Charge} = \text{Quantity (kg)} \times \text{Rate (₹/kg)}$.
+- **Quick Entry Screen**: Displays all active customers for any selected date (`Asia/Kolkata` timezone).
+- **Auto Calculation**:
+  $$\text{Daily Charge} = \text{Quantity (kg)} \times \text{Rate (₹/kg)}$$
 - **Zero Delivery Handling**: One-click "0 kg / Absent" records no milk with ₹0 charge.
 - **Strict Units**: Always measured in **kg** and **₹/kg** (no silent conversions to liters).
 - **Immediate Balance Update**: Updates customer running balance and daily totals without page reload.
@@ -79,7 +91,26 @@ The application provides dual login and registration options:
 
 ---
 
-## 🚀 How to Run Locally
+## 🚀 Setup and Configuration
+
+### Connecting Supabase Authentication
+
+1. Create a free project at [Supabase](https://supabase.com).
+2. Copy your Project URL and public `anon` key from **Settings > API**.
+3. Run the SQL script `supabase-schema.sql` in the **SQL Editor** of your Supabase dashboard to set up tables and Row-Level Security policies.
+4. Configure in one of two easy ways:
+   - **Method A (Environment Variables)**:
+     Create a `.env` file in the project root:
+     ```env
+     VITE_SUPABASE_URL=https://your-project-id.supabase.co
+     VITE_SUPABASE_ANON_KEY=your-supabase-public-anon-key
+     ```
+   - **Method B (In-App Assistant)**:
+     Launch the app and click **"Configure Backend"** on the login screen. Enter your Project URL and Anon Key and click **"Save & Connect"**. The app tests connection immediately!
+
+---
+
+## 💻 How to Run Locally
 
 ### Prerequisites
 - Node.js (v18+)
@@ -96,23 +127,10 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ```bash
 npm test
 ```
+Runs the 16 automated tests covering calculations, rounding, ledger chronology, monthly billing, balance formulas, date arithmetic, account scoping, and authentication security gates.
 
 ### Production Build
 ```bash
 npm run build
 ```
-
----
-
-## 🔑 Quick Login Credentials (for testing)
-
-- **Seller Login**:
-  - Email: `drsanjay@dairy.com`
-  - Password: `dairy123`
-  - Or click **"Continue with Google"** $\rightarrow$ select Dr. Sanjay Kumar.
-- **Customer Login**:
-  - Switch tab to **Customer Login**
-  - Email: `ramesh.sharma@gmail.com`
-  - Password: `customer123`
-  - Or click **"Continue with Google"** $\rightarrow$ select any Google account.
-  - Or click **"Create Account"** to sign up as a new customer.
+Creates an optimized static production build in `dist/`.

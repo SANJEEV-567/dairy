@@ -19,57 +19,33 @@ import CustomerPortalView from './components/CustomerPortalView';
 import { 
   loadFromStorage, 
   saveToStorage, 
-  generateId 
+  generateId,
+  getScopedKey,
+  migrateLegacyRecordsToAccount 
 } from './utils/storage';
 import { STORAGE_KEYS } from './utils/constants';
 import { getCustomerBalance } from './utils/calculations';
 import { roundToTwo, getTodayKolkata } from './utils/formatters';
-import { getCurrentUser, logout as authLogout } from './utils/auth';
+import { 
+  getActiveSession, 
+  subscribeToAuthChanges, 
+  signOutUser 
+} from './utils/authService';
 
 export default function App() {
-  // Current Authenticated User (Seller or Customer)
-  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecking, setAuthChecking] = useState(true);
 
-  // Navigation active tab: 'dashboard' | 'daily-entry' | 'customers' | 'ledger' | 'billing' | 'payments' | 'backup'
+  // Navigation active tab for seller
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  // Core Persistent State
-  const [customers, setCustomers] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.CUSTOMERS, [])
-  );
-  const [deliveries, setDeliveries] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.DELIVERIES, [])
-  );
-  const [payments, setPayments] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.PAYMENTS, [])
-  );
-  const [adjustments, setAdjustments] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.ADJUSTMENTS, [])
-  );
-  const [statusOverrides, setStatusOverrides] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.STATUS_OVERRIDES, [])
-  );
-
-  // Sync to localStorage whenever state changes
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CUSTOMERS, customers);
-  }, [customers]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.DELIVERIES, deliveries);
-  }, [deliveries]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.PAYMENTS, payments);
-  }, [payments]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.ADJUSTMENTS, adjustments);
-  }, [adjustments]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.STATUS_OVERRIDES, statusOverrides);
-  }, [statusOverrides]);
+  // Account-Scoped Persistent State
+  const [customers, setCustomers] = useState([]);
+  const [deliveries, setDeliveries] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [adjustments, setAdjustments] = useState([]);
+  const [statusOverrides, setStatusOverrides] = useState([]);
 
   // UI Modals State
   const [toast, setToast] = useState(null);
@@ -110,13 +86,119 @@ export default function App() {
     }, 4000);
   };
 
-  // Reload all state from storage (used after backup restore or reset)
+  // 1. Initial Session Check on App Mount
+  useEffect(() => {
+    let mounted = true;
+
+    getActiveSession()
+      .then(user => {
+        if (mounted) {
+          setCurrentUser(user);
+          setAuthChecking(false);
+        }
+      })
+      .catch(err => {
+        console.error("Session check failed:", err);
+        if (mounted) {
+          setAuthChecking(false);
+        }
+      });
+
+    // Listen to real-time auth changes from Supabase (sign in, sign out, token refresh)
+    const unsubscribe = subscribeToAuthChanges((event, user) => {
+      if (mounted) {
+        setCurrentUser(user);
+        if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  // 2. Load and Sync Account-Scoped Records whenever currentUser changes
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setCustomers([]);
+      setDeliveries([]);
+      setPayments([]);
+      setAdjustments([]);
+      setStatusOverrides([]);
+      return;
+    }
+
+    const userId = currentUser.id;
+
+    // Migrate any legacy unassigned records to this authenticated dairy account
+    const migrationResult = migrateLegacyRecordsToAccount(userId);
+    if (migrationResult.migrated) {
+      showToast(`Migrated ${migrationResult.stats.customers} existing local customers to your authenticated dairy account!`, 'info');
+    }
+
+    // Load account-scoped records
+    const scopedCust = loadFromStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, userId), []);
+    const scopedDeliv = loadFromStorage(getScopedKey(STORAGE_KEYS.DELIVERIES, userId), []);
+    const scopedPay = loadFromStorage(getScopedKey(STORAGE_KEYS.PAYMENTS, userId), []);
+    const scopedAdj = loadFromStorage(getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId), []);
+    const scopedOvr = loadFromStorage(getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId), []);
+
+    setCustomers(scopedCust);
+    setDeliveries(scopedDeliv);
+    setPayments(scopedPay);
+    setAdjustments(scopedAdj);
+    setStatusOverrides(scopedOvr);
+  }, [currentUser?.id]);
+
+  // Sync to account-scoped storage whenever state updates
+  useEffect(() => {
+    if (currentUser?.id) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, currentUser.id), customers);
+    }
+  }, [customers, currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.DELIVERIES, currentUser.id), deliveries);
+    }
+  }, [deliveries, currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.PAYMENTS, currentUser.id), payments);
+    }
+  }, [payments, currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.ADJUSTMENTS, currentUser.id), adjustments);
+    }
+  }, [adjustments, currentUser?.id]);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      saveToStorage(getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, currentUser.id), statusOverrides);
+    }
+  }, [statusOverrides, currentUser?.id]);
+
+  // Reload data for account
   const handleDataReloaded = () => {
-    setCustomers(loadFromStorage(STORAGE_KEYS.CUSTOMERS, []));
-    setDeliveries(loadFromStorage(STORAGE_KEYS.DELIVERIES, []));
-    setPayments(loadFromStorage(STORAGE_KEYS.PAYMENTS, []));
-    setAdjustments(loadFromStorage(STORAGE_KEYS.ADJUSTMENTS, []));
-    setStatusOverrides(loadFromStorage(STORAGE_KEYS.STATUS_OVERRIDES, []));
+    if (!currentUser?.id) return;
+    const userId = currentUser.id;
+    setCustomers(loadFromStorage(getScopedKey(STORAGE_KEYS.CUSTOMERS, userId), []));
+    setDeliveries(loadFromStorage(getScopedKey(STORAGE_KEYS.DELIVERIES, userId), []));
+    setPayments(loadFromStorage(getScopedKey(STORAGE_KEYS.PAYMENTS, userId), []));
+    setAdjustments(loadFromStorage(getScopedKey(STORAGE_KEYS.ADJUSTMENTS, userId), []));
+    setStatusOverrides(loadFromStorage(getScopedKey(STORAGE_KEYS.STATUS_OVERRIDES, userId), []));
+  };
+
+  const handleLogout = async () => {
+    await signOutUser();
+    setCurrentUser(null);
+    showToast("Signed out successfully.");
   };
 
   // ----------------------------------------------------
@@ -125,7 +207,6 @@ export default function App() {
   const handleSaveCustomer = (customerData) => {
     try {
       if (customerData.id) {
-        // Edit existing customer
         setCustomers(prev => prev.map(c => {
           if (c.id === customerData.id) {
             return {
@@ -144,10 +225,10 @@ export default function App() {
         }));
         showToast(`Customer "${customerData.name}" updated successfully.`);
       } else {
-        // Add new customer
         const newId = generateId('cust');
         const newCustomer = {
           id: newId,
+          dairy_id: currentUser?.id,
           name: customerData.name,
           phone: customerData.phone,
           address: customerData.address,
@@ -160,11 +241,11 @@ export default function App() {
 
         setCustomers(prev => [...prev, newCustomer]);
 
-        // If an opening balance was entered, record it as an initial balance adjustment
         if (customerData.openingBalance && customerData.openingBalance > 0) {
           const isCredit = customerData.openingBalanceType === 'credit';
           const adj = {
             id: generateId('adj'),
+            dairy_id: currentUser?.id,
             customerId: newId,
             type: isCredit ? 'credit' : 'debit',
             amount: customerData.openingBalance,
@@ -216,7 +297,6 @@ export default function App() {
   const handleSaveDelivery = (deliveryRecord) => {
     try {
       if (deliveryRecord.id) {
-        // Update existing delivery
         setDeliveries(prev => prev.map(d => {
           if (d.id === deliveryRecord.id) {
             return {
@@ -234,7 +314,6 @@ export default function App() {
         }));
         showToast("Delivery record updated successfully.");
       } else {
-        // Check if there is already a delivery for this customer on this date
         const existing = deliveries.find(
           d => d.customerId === deliveryRecord.customerId && d.date === deliveryRecord.date
         );
@@ -258,6 +337,7 @@ export default function App() {
         } else {
           const newDelivery = {
             id: generateId('deliv'),
+            dairy_id: currentUser?.id,
             ...deliveryRecord,
             createdAt: new Date().toISOString()
           };
@@ -291,6 +371,7 @@ export default function App() {
           } else {
             updated.push({
               id: generateId('deliv'),
+              dairy_id: currentUser?.id,
               ...rec,
               createdAt: new Date().toISOString()
             });
@@ -329,6 +410,7 @@ export default function App() {
       } else {
         const newPayment = {
           id: generateId('pay'),
+          dairy_id: currentUser?.id,
           ...paymentRecord,
           createdAt: new Date().toISOString()
         };
@@ -365,6 +447,7 @@ export default function App() {
       } else {
         const newAdj = {
           id: generateId('adj'),
+          dairy_id: currentUser?.id,
           ...adjustmentRecord,
           createdAt: new Date().toISOString()
         };
@@ -377,7 +460,7 @@ export default function App() {
   };
 
   // ----------------------------------------------------
-  // Status Override Handlers (Preserves Audit History)
+  // Status Override Handlers
   // ----------------------------------------------------
   const handleSaveStatusOverride = ({ customerId, month, status, reason }) => {
     setStatusOverrides(prev => {
@@ -444,9 +527,7 @@ export default function App() {
     });
   };
 
-  // ----------------------------------------------------
-  // Quick View Triggers
-  // ----------------------------------------------------
+  // Quick Action Triggers
   const openRecordDeliveryForCustomer = (customer, date = null, existingDelivery = null) => {
     setDeliveryCustomer(customer);
     setDeliveryDate(date);
@@ -482,17 +563,27 @@ export default function App() {
     setAdjustmentModalOpen(true);
   };
 
-  // Calculate total outstanding balance across all customers (all receivables due)
+  // Calculate total outstanding balance across all customer accounts
   const totalDueAcrossActiveCustomers = customers
     .reduce((sum, c) => sum + getCustomerBalance(c.id, deliveries, payments, adjustments), 0);
 
-  const handleLogout = () => {
-    authLogout();
-    setCurrentUser(null);
-    showToast("Signed out successfully.");
-  };
+  // ----------------------------------------------------
+  // Render States: Auth Loading, Login Screen, Customer View, Seller View
+  // ----------------------------------------------------
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-emerald-600 animate-pulse flex items-center justify-center text-white mb-4">
+          <span className="font-black text-xl">D</span>
+        </div>
+        <p className="text-sm font-semibold text-slate-300">
+          Connecting to Dr. Sanjay Kumar Dairy secure session...
+        </p>
+      </div>
+    );
+  }
 
-  // If user is not authenticated, display login & registration page
+  // Not signed in: Show Login / Sign Up / Password Reset flow
   if (!currentUser) {
     return (
       <>
@@ -508,7 +599,7 @@ export default function App() {
     );
   }
 
-  // If user is a Customer, display Customer Portal
+  // Signed in as Customer: Show Customer Milk Account Portal
   if (currentUser.role === 'customer') {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -538,7 +629,7 @@ export default function App() {
               Dr. Sanjay Kumar Dairy — Customer Account Portal
             </p>
             <p className="text-slate-400">
-              Direct Daily Milk & Billing Records • Asia/Kolkata
+              Authenticated Account: {currentUser.email} • Asia/Kolkata
             </p>
           </div>
         </footer>
@@ -546,6 +637,7 @@ export default function App() {
     );
   }
 
+  // Signed in as Seller: Show Full Milk Management & Billing System
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       
@@ -624,7 +716,7 @@ export default function App() {
         }}
       />
 
-      {/* Navigation Bar */}
+      {/* Navigation Bar with User Identity & Logout */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -741,14 +833,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer (Hidden in Print) */}
+      {/* Footer */}
       <footer className="bg-white border-t border-slate-200/80 py-6 text-center text-xs text-slate-500 no-print mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="font-semibold text-slate-700">
             Dr. Sanjay Kumar Dairy Management System
           </p>
           <p className="text-slate-400">
-            Real Business Edition • Local Persistent Storage • Asia/Kolkata Timezone
+            Authenticated Account: {currentUser.email} • Row-Level Security Enforced
           </p>
         </div>
       </footer>
