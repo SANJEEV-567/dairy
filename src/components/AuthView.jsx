@@ -114,9 +114,10 @@ export default function AuthView({ onAuthSuccess, showToast }) {
     }
   };
 
-  // Initialize Google Identity Services if client ID is configured in .env
+  // Initialize Google Identity Services (GIS) / One-Tap if client ID is configured
   useEffect(() => {
-    const googleClientId = typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID;
+    const DEFAULT_GOOGLE_CLIENT_ID = '785971186192-r3jul83j9a88iqnp3fhtabuj7nks3g2j.apps.googleusercontent.com';
+    const googleClientId = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID) || DEFAULT_GOOGLE_CLIENT_ID;
     if (googleClientId && window.google?.accounts?.id) {
       try {
         window.google.accounts.id.initialize({
