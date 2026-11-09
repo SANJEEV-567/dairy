@@ -4,6 +4,9 @@ export const DAIRY_LOCATION = "Main Market Road, Dairy Farm";
 export const DAIRY_PHONE = "+91 98765 43210";
 export const TIMEZONE = "Asia/Kolkata";
 
+// Single authorized Dairy Seller for the entire system
+export const AUTHORIZED_SELLER_EMAIL = "sanjeevkumarxcg@gmail.com";
+
 export const PAYMENT_METHODS = [
   "Cash",
   "UPI (GPay / PhonePe / Paytm)",

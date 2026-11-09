@@ -278,3 +278,23 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- --------------------------------------------------------------------
+-- 8. Single-Seller Security Enforcement (Backend Level)
+-- --------------------------------------------------------------------
+-- Strictly restricts registration and access to sanjeevkumarxcg@gmail.com
+CREATE OR REPLACE FUNCTION public.check_single_seller_account()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF LOWER(NEW.email) <> 'sanjeevkumarxcg@gmail.com' THEN
+    RAISE EXCEPTION 'Access denied: Public registration is disabled. Only the authorized Seller (sanjeevkumarxcg@gmail.com) is permitted.';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS enforce_single_seller_on_users ON auth.users;
+CREATE TRIGGER enforce_single_seller_on_users
+  BEFORE INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.check_single_seller_account();
+

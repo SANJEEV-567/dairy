@@ -14,16 +14,13 @@ import DeliveryModal from './components/DeliveryModal';
 import ConfirmModal from './components/ConfirmModal';
 import Toast from './components/Toast';
 import AuthView from './components/AuthView';
-import CustomerPortalView from './components/CustomerPortalView';
 
 import { 
   loadFromStorage, 
   saveToStorage, 
   generateId,
   getScopedKey,
-  migrateLegacyRecordsToAccount,
-  linkCustomerAccountLocally,
-  getLinkedCustomerData
+  migrateLegacyRecordsToAccount
 } from './utils/storage';
 import { STORAGE_KEYS } from './utils/constants';
 import { getCustomerBalance } from './utils/calculations';
@@ -31,12 +28,10 @@ import { roundToTwo, getTodayKolkata, generateCustomerCode } from './utils/forma
 import { 
   getActiveSession, 
   subscribeToAuthChanges, 
-  signOutUser,
-  linkCustomerAccountByCode
+  signOutUser
 } from './utils/authService';
 import { 
   fetchSellerDataFromSupabase,
-  fetchCustomerDataFromSupabase,
   syncCustomerToSupabase,
   syncDeliveryToSupabase,
   syncDeliveriesBatchToSupabase,
@@ -135,42 +130,6 @@ export default function App() {
     };
   }, []);
 
-  // Helper to load customer records for linked customer account
-  const loadCustomerData = (userId, customCode = null) => {
-    let linked = getLinkedCustomerData(userId);
-    const codeToTry = customCode || currentUser?.customerCode;
-
-    // If not linked yet, but customerCode exists, attempt auto-linking locally
-    if (!linked && codeToTry) {
-      linkCustomerAccountLocally(codeToTry, userId);
-      linked = getLinkedCustomerData(userId);
-    }
-
-    if (linked && linked.customer) {
-      setCustomers([linked.customer]);
-      setDeliveries(linked.deliveries || []);
-      setPayments(linked.payments || []);
-      setAdjustments(linked.adjustments || []);
-      setStatusOverrides(linked.statusOverrides || []);
-    } else {
-      setCustomers([]);
-      setDeliveries([]);
-      setPayments([]);
-      setAdjustments([]);
-      setStatusOverrides([]);
-    }
-
-    // Live remote sync from Supabase PostgreSQL
-    fetchCustomerDataFromSupabase(codeToTry, userId).then(remote => {
-      if (remote && remote.customer) {
-        setCustomers([remote.customer]);
-        setDeliveries(remote.deliveries || []);
-        setPayments(remote.payments || []);
-        setAdjustments(remote.adjustments || []);
-      }
-    }).catch(() => {});
-  };
-
   // 2. Load and Sync Account-Scoped Records whenever currentUser changes
   useEffect(() => {
     if (!currentUser?.id) {
@@ -184,13 +143,6 @@ export default function App() {
 
     const userId = currentUser.id;
 
-    // Handle Customer Portal Session
-    if (currentUser.role === 'customer') {
-      loadCustomerData(userId);
-      return;
-    }
-
-    // Handle Seller Portal Session
     // Migrate any legacy unassigned records to this authenticated dairy account
     const migrationResult = migrateLegacyRecordsToAccount(userId);
     if (migrationResult.migrated) {
@@ -291,62 +243,6 @@ export default function App() {
     await signOutUser();
     setCurrentUser(null);
     showToast("Signed out successfully.");
-  };
-
-  // Link customer account to dairy records via seller-issued code
-  const handleLinkCustomerAccount = async (code) => {
-    if (!currentUser?.id) return { success: false, error: "You must be signed in." };
-
-    const cleanCode = code.trim().toUpperCase();
-
-    // 1. Link in local storage
-    const localRes = linkCustomerAccountLocally(cleanCode, currentUser.id);
-
-    // 2. Also link via Supabase RPC if configured
-    try {
-      await linkCustomerAccountByCode(cleanCode);
-    } catch (e) {
-      // Non-blocking for offline/local mode
-    }
-
-    if (localRes.success) {
-      setCurrentUser(prev => ({ ...prev, customerCode: cleanCode }));
-      loadCustomerData(currentUser.id, cleanCode);
-      return { success: true, customerName: localRes.customer.name };
-    }
-
-    return { 
-      success: false, 
-      error: localRes.error || "Customer code not recognized. Check with Dr. Sanjay Kumar Dairy." 
-    };
-  };
-
-  // Handle payment submitted by customer in Customer Portal
-  const handleCustomerPaymentSubmit = (paymentData) => {
-    const cust = customers[0];
-    const newPayment = {
-      id: generateId('pay'),
-      dairy_id: cust?.dairy_id || null,
-      customerId: cust?.id || paymentData.customerId,
-      amount: roundToTwo(parseFloat(paymentData.amount)),
-      date: paymentData.date,
-      time: paymentData.time,
-      paymentMethod: paymentData.paymentMethod || 'UPI',
-      note: paymentData.note || '',
-      createdAt: new Date().toISOString()
-    };
-
-    // Update customer portal state
-    setPayments(prev => [newPayment, ...prev]);
-
-    // Save to the dairy seller's payment records in storage
-    const dairyId = cust?.dairy_id;
-    if (dairyId) {
-      const sellerPayKey = getScopedKey(STORAGE_KEYS.PAYMENTS, dairyId);
-      const existingPay = loadFromStorage(sellerPayKey, []);
-      saveToStorage(sellerPayKey, [newPayment, ...existingPay]);
-      syncPaymentToSupabase(newPayment, dairyId);
-    }
   };
 
   // ----------------------------------------------------
@@ -784,46 +680,7 @@ export default function App() {
     );
   }
 
-  // Signed in as Customer: Show Customer Milk Account Portal
-  if (currentUser.role === 'customer') {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <Toast toast={toast} onClose={() => setToast(null)} />
-        <Navbar
-          activeTab="customer-portal"
-          setActiveTab={() => {}}
-          totalDue={0}
-          currentUser={currentUser}
-          onLogout={handleLogout}
-        />
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-          <CustomerPortalView
-            currentUser={currentUser}
-            customers={customers}
-            deliveries={deliveries}
-            payments={payments}
-            adjustments={adjustments}
-            statusOverrides={statusOverrides}
-            onLinkAccount={handleLinkCustomerAccount}
-            onCustomerPaymentSubmit={handleCustomerPaymentSubmit}
-            showToast={showToast}
-          />
-        </main>
-        <footer className="bg-white border-t border-slate-200/80 py-6 text-center text-xs text-slate-500 no-print mt-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <p className="font-semibold text-slate-700">
-              Dr. Sanjay Kumar Dairy — Customer Account Portal
-            </p>
-            <p className="text-slate-400">
-              Authenticated Account: {currentUser.email} • Asia/Kolkata
-            </p>
-          </div>
-        </footer>
-      </div>
-    );
-  }
-
-  // Signed in as Seller: Show Full Milk Management & Billing System
+  // Signed in as Authorized Seller: Show Full Milk Management & Billing System
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       

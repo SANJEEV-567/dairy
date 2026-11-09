@@ -1,4 +1,5 @@
-import { getSupabaseClient, isSupabaseConfigured, getSupabaseConfig } from './supabase.js';
+import { getSupabaseClient, isSupabaseConfigured } from './supabase.js';
+import { AUTHORIZED_SELLER_EMAIL } from './constants.js';
 
 /**
  * Format auth errors into human-friendly messages
@@ -8,19 +9,19 @@ function normalizeAuthError(error) {
   const msg = error.message || String(error);
 
   if (msg.toLowerCase().includes('invalid login credentials')) {
-    return "Incorrect email or password. Please check your credentials and try again.";
+    return "Incorrect password. Please verify your password and try again.";
   }
   if (msg.toLowerCase().includes('email not confirmed')) {
-    return "Your email has not been verified yet. Check your inbox, or in your Supabase Dashboard under Authentication > Providers > Email, turn OFF 'Confirm email' for instant sign in.";
+    return "Email verification required. In Supabase Dashboard under Authentication > Providers > Email, turn OFF 'Confirm email' for instant login.";
   }
   if (msg.toLowerCase().includes('user already registered')) {
-    return "An account with this email address already exists. Please sign in instead.";
+    return "An account with this email address already exists.";
   }
   if (msg.toLowerCase().includes('password should be at least')) {
     return "Password is too weak. Please use at least 6 characters.";
   }
   if (msg.toLowerCase().includes('rate limit')) {
-    return "Too many requests. Please wait a few moments before trying again.";
+    return "Too many attempts. Please wait a few moments before trying again.";
   }
   if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
     return "Network error: Unable to connect to authentication server. Check your connection or Supabase URL.";
@@ -29,60 +30,24 @@ function normalizeAuthError(error) {
 }
 
 /**
- * Sign up a new user (Seller or Customer) with real email & password
- */
-export async function signUpUser({ email, password, name, role = 'seller', customerCode = '' }) {
-  if (!isSupabaseConfigured()) {
-    return {
-      success: false,
-      notConfigured: true,
-      error: "Authentication backend is not connected. Please configure your Supabase Project URL and Public Anon Key."
-    };
-  }
-
-  const supabase = getSupabaseClient();
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanName = name.trim();
-  const cleanCode = customerCode ? customerCode.trim().toUpperCase() : '';
-
-  try {
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: password,
-      options: {
-        data: {
-          name: cleanName,
-          role: role,
-          customer_code: cleanCode
-        }
-      }
-    });
-
-    if (error) {
-      return { success: false, error: normalizeAuthError(error) };
-    }
-
-    const user = data.user;
-    const session = data.session;
-    // Real email verification check: only confirmed if provider explicitly confirms it
-    const needsEmailVerification = Boolean(user && !user.confirmed_at && !session);
-
-    return {
-      success: true,
-      user,
-      session,
-      needsEmailVerification,
-      role
-    };
-  } catch (err) {
-    return { success: false, error: normalizeAuthError(err) };
-  }
-}
-
-/**
- * Sign in existing user with real email & password
+ * Single Authorized Seller Sign-In with real email & password
+ * Strictly permits only AUTHORIZED_SELLER_EMAIL
  */
 export async function signInUser({ email, password }) {
+  const cleanEmail = email ? email.trim().toLowerCase() : '';
+
+  // 1. Strict single-seller authorization check
+  if (cleanEmail !== AUTHORIZED_SELLER_EMAIL.toLowerCase()) {
+    return {
+      success: false,
+      error: `Access denied. Only the authorized Dairy Seller (${AUTHORIZED_SELLER_EMAIL}) is permitted to access this system.`
+    };
+  }
+
+  if (!password) {
+    return { success: false, error: "Please enter your password." };
+  }
+
   if (!isSupabaseConfigured()) {
     return {
       success: false,
@@ -92,7 +57,6 @@ export async function signInUser({ email, password }) {
   }
 
   const supabase = getSupabaseClient();
-  const cleanEmail = email.trim().toLowerCase();
 
   try {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -105,9 +69,17 @@ export async function signInUser({ email, password }) {
     }
 
     const user = data.user;
-    const role = user?.user_metadata?.role || 'seller';
-    const name = user?.user_metadata?.name || user.email.split('@')[0];
-    const customerCode = user?.user_metadata?.customer_code || '';
+
+    // 2. Extra verification: Ensure returned authenticated account matches the authorized seller
+    if (!user || user.email?.toLowerCase() !== AUTHORIZED_SELLER_EMAIL.toLowerCase()) {
+      await supabase.auth.signOut();
+      return {
+        success: false,
+        error: `Access denied. Only the authorized Dairy Seller (${AUTHORIZED_SELLER_EMAIL}) is permitted to access this system.`
+      };
+    }
+
+    const name = user?.user_metadata?.name || 'Dr. Sanjay Kumar';
 
     return {
       success: true,
@@ -115,8 +87,7 @@ export async function signInUser({ email, password }) {
         id: user.id,
         email: user.email,
         name: name,
-        role: role,
-        customerCode: customerCode,
+        role: 'seller',
         avatar: user?.user_metadata?.avatar_url || null,
         emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
         provider: user.app_metadata?.provider || 'email'
@@ -129,106 +100,28 @@ export async function signInUser({ email, password }) {
 }
 
 /**
- * Sign in using Google OAuth through Supabase
+ * Public sign-up is permanently disabled.
  */
-export async function signInWithGoogleOAuth(role = 'seller', customerCode = '') {
-  if (!isSupabaseConfigured()) {
-    return {
-      success: false,
-      notConfigured: true,
-      error: "Authentication backend is not connected. Please configure your Supabase Project URL and Public Anon Key."
-    };
-  }
-
-  const supabase = getSupabaseClient();
-
-  try {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      sessionStorage.setItem('dsk_pending_auth_role', role);
-      if (customerCode) {
-        sessionStorage.setItem('dsk_pending_customer_code', customerCode.trim().toUpperCase());
-      }
-    }
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent'
-        }
-      }
-    });
-
-    if (error) {
-      return { success: false, error: normalizeAuthError(error) };
-    }
-
-    return { success: true, data };
-  } catch (err) {
-    return { success: false, error: normalizeAuthError(err) };
-  }
+export async function signUpUser() {
+  return {
+    success: false,
+    error: "Public registration is disabled. This system is restricted to the single authorized Dairy Seller."
+  };
 }
 
 /**
- * Sign in using Google ID Token / Credential from Google Identity Services API
- */
-export async function signInWithGoogleCredential(idToken, role = 'seller', customerCode = '') {
-  if (!isSupabaseConfigured()) {
-    return {
-      success: false,
-      notConfigured: true,
-      error: "Authentication backend is not connected."
-    };
-  }
-
-  const supabase = getSupabaseClient();
-
-  try {
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: idToken
-    });
-
-    if (error) {
-      return { success: false, error: normalizeAuthError(error) };
-    }
-
-    const user = data.user;
-    let userRole = user?.user_metadata?.role || role;
-    let code = user?.user_metadata?.customer_code || customerCode;
-
-    // Save metadata if not present
-    if (!user?.user_metadata?.role) {
-      await supabase.auth.updateUser({
-        data: { role: userRole, customer_code: code }
-      }).catch(() => {});
-    }
-
-    return {
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0],
-        role: userRole,
-        customerCode: code || '',
-        avatar: user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null,
-        emailConfirmed: true,
-        provider: 'google'
-      },
-      session: data.session
-    };
-  } catch (err) {
-    return { success: false, error: normalizeAuthError(err) };
-  }
-}
-
-/**
- * Send password reset email
+ * Send password reset email strictly for the authorized Seller account
  */
 export async function sendPasswordResetEmail(email) {
+  const cleanEmail = email ? email.trim().toLowerCase() : '';
+
+  if (cleanEmail !== AUTHORIZED_SELLER_EMAIL.toLowerCase()) {
+    return {
+      success: false,
+      error: `Access denied. Password reset is only available for the authorized Dairy Seller (${AUTHORIZED_SELLER_EMAIL}).`
+    };
+  }
+
   if (!isSupabaseConfigured()) {
     return {
       success: false,
@@ -238,7 +131,6 @@ export async function sendPasswordResetEmail(email) {
   }
 
   const supabase = getSupabaseClient();
-  const cleanEmail = email.trim().toLowerCase();
 
   try {
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
@@ -259,7 +151,7 @@ export async function sendPasswordResetEmail(email) {
 }
 
 /**
- * Update user password after clicking reset link
+ * Update seller password after clicking reset link
  */
 export async function updateUserPassword(newPassword) {
   if (!isSupabaseConfigured()) {
@@ -281,14 +173,17 @@ export async function updateUserPassword(newPassword) {
       return { success: false, error: normalizeAuthError(error) };
     }
 
-    return { success: true, message: "Password updated successfully. You can now use your new password." };
+    return { 
+      success: true, 
+      message: "Password updated successfully. You can now log in with your new password." 
+    };
   } catch (err) {
     return { success: false, error: normalizeAuthError(err) };
   }
 }
 
 /**
- * Sign out user
+ * Securely sign out the seller
  */
 export async function signOutUser() {
   if (!isSupabaseConfigured()) return { success: true };
@@ -304,6 +199,7 @@ export async function signOutUser() {
 
 /**
  * Check and get current session on app load
+ * Rejects and terminates any session that is not the single authorized seller
  */
 export async function getActiveSession() {
   if (!isSupabaseConfigured()) return null;
@@ -313,38 +209,22 @@ export async function getActiveSession() {
     if (!data?.session?.user) return null;
 
     const user = data.session.user;
-    let role = user?.user_metadata?.role;
-    let customerCode = user?.user_metadata?.customer_code;
 
-    // Check if there was a pending role/code from Google OAuth redirect
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      const pendingRole = sessionStorage.getItem('dsk_pending_auth_role');
-      const pendingCode = sessionStorage.getItem('dsk_pending_customer_code');
-
-      if (pendingRole && (!role || role !== pendingRole)) {
-        role = pendingRole;
-        supabase.auth.updateUser({ data: { role: pendingRole } }).catch(() => {});
-      }
-      if (pendingCode && !customerCode) {
-        customerCode = pendingCode;
-        supabase.auth.updateUser({ data: { customer_code: pendingCode } }).catch(() => {});
-      }
-      sessionStorage.removeItem('dsk_pending_auth_role');
-      sessionStorage.removeItem('dsk_pending_customer_code');
+    // Strict single-seller session check
+    if (user.email?.toLowerCase() !== AUTHORIZED_SELLER_EMAIL.toLowerCase()) {
+      await supabase.auth.signOut();
+      return null;
     }
 
-    const isGoogle = user.app_metadata?.provider === 'google';
-    const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0];
-    const avatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+    const displayName = user?.user_metadata?.name || 'Dr. Sanjay Kumar';
 
     return {
       id: user.id,
       email: user.email,
       name: displayName,
-      role: role || 'seller',
-      customerCode: customerCode || '',
-      avatar: avatar,
-      emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at || isGoogle),
+      role: 'seller',
+      avatar: user?.user_metadata?.avatar_url || null,
+      emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
       provider: user.app_metadata?.provider || 'email'
     };
   } catch (e) {
@@ -354,56 +234,32 @@ export async function getActiveSession() {
 }
 
 /**
- * Link an authenticated customer user account to a dairy customer record using seller-issued code
- */
-export async function linkCustomerAccountByCode(customerCode) {
-  if (!isSupabaseConfigured()) {
-    return { success: false, notConfigured: true, error: "Backend not connected." };
-  }
-  const supabase = getSupabaseClient();
-  try {
-    const { data, error } = await supabase.rpc('link_customer_account', {
-      p_customer_code: customerCode.trim().toUpperCase()
-    });
-    if (error) return { success: false, error: normalizeAuthError(error) };
-    return data;
-  } catch (err) {
-    return { success: false, error: normalizeAuthError(err) };
-  }
-}
-
-/**
  * Subscribe to auth state changes
+ * Automatically purges any unauthorized session
  */
 export function subscribeToAuthChanges(callback) {
   if (!isSupabaseConfigured()) return () => {};
   const supabase = getSupabaseClient();
   
-  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
       const user = session.user;
-      let role = user?.user_metadata?.role;
-      let customerCode = user?.user_metadata?.customer_code;
 
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        const pendingRole = sessionStorage.getItem('dsk_pending_auth_role');
-        const pendingCode = sessionStorage.getItem('dsk_pending_customer_code');
-        if (pendingRole && !role) role = pendingRole;
-        if (pendingCode && !customerCode) customerCode = pendingCode;
+      if (user.email?.toLowerCase() !== AUTHORIZED_SELLER_EMAIL.toLowerCase()) {
+        await supabase.auth.signOut();
+        callback(event, null);
+        return;
       }
 
-      const isGoogle = user.app_metadata?.provider === 'google';
-      const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user.email.split('@')[0];
-      const avatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+      const displayName = user?.user_metadata?.name || 'Dr. Sanjay Kumar';
 
       callback(event, {
         id: user.id,
         email: user.email,
         name: displayName,
-        role: role || 'seller',
-        customerCode: customerCode || '',
-        avatar: avatar,
-        emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at || isGoogle),
+        role: 'seller',
+        avatar: user?.user_metadata?.avatar_url || null,
+        emailConfirmed: Boolean(user.confirmed_at || user.email_confirmed_at),
         provider: user.app_metadata?.provider || 'email'
       });
     } else {
@@ -414,4 +270,19 @@ export function subscribeToAuthChanges(callback) {
   return () => {
     subscription.unsubscribe();
   };
+}
+
+/**
+ * Google OAuth and Customer Linking stubs disabled in single-seller mode
+ */
+export async function signInWithGoogleOAuth() {
+  return { success: false, error: "Google sign-in has been disabled. Please use your Seller email and password." };
+}
+
+export async function signInWithGoogleCredential() {
+  return { success: false, error: "Google sign-in has been disabled." };
+}
+
+export async function linkCustomerAccountByCode() {
+  return { success: false, error: "Customer accounts are disabled. This portal is for the Dairy Seller only." };
 }

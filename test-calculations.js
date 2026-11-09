@@ -25,7 +25,7 @@ import {
   generateMonthlyBill, 
   getDailyDashboardMetrics 
 } from './src/utils/calculations.js';
-import { BILL_STATUS, STORAGE_KEYS } from './src/utils/constants.js';
+import { BILL_STATUS, STORAGE_KEYS, AUTHORIZED_SELLER_EMAIL } from './src/utils/constants.js';
 import { 
   getScopedKey, 
   migrateLegacyRecordsToAccount, 
@@ -172,23 +172,36 @@ assert.strictEqual(migratedCust[0].dairy_id, 'authenticated_seller_uuid', "Migra
 // Test 15: Security Gate - isSupabaseConfigured returns false when backend is unconfigured
 assert.strictEqual(isSupabaseConfigured(), false, "isSupabaseConfigured must be false when no valid URL/anonKey provided");
 
-// Test 16: Safe Rejection - Auth methods refuse to simulate logins when unconfigured
+// Test 16: Strict Single-Seller Enforcement & Rejection of Unauthorized Accounts
 async function testAuthSafety() {
-  const signUpRes = await signUpUser({ email: 'seller@test.com', password: 'password123', name: 'Seller', role: 'seller' });
-  assert.strictEqual(signUpRes.success, false, "signUpUser must fail when backend unconfigured");
-  assert.strictEqual(signUpRes.notConfigured, true, "Must flag notConfigured as true");
+  // 1. Unauthorized email must be rejected immediately
+  const unauthorizedSignIn = await signInUser({ email: 'unauthorized@test.com', password: 'password123' });
+  assert.strictEqual(unauthorizedSignIn.success, false, "Unauthorized email must be rejected");
+  assert.ok(unauthorizedSignIn.error.includes("sanjeevkumarxcg@gmail.com"), "Error must specify only authorized seller is permitted");
 
-  const signInRes = await signInUser({ email: 'seller@test.com', password: 'password123' });
-  assert.strictEqual(signInRes.success, false, "signInUser must fail when backend unconfigured");
-  assert.strictEqual(signInRes.notConfigured, true, "Must flag notConfigured as true");
+  // 2. Public sign up must be permanently disabled
+  const signUpRes = await signUpUser({ email: 'sanjeevkumarxcg@gmail.com', password: 'password123' });
+  assert.strictEqual(signUpRes.success, false, "signUpUser must fail because public registration is disabled");
+  assert.ok(signUpRes.error.includes("disabled"), "Error must state registration is disabled");
 
-  const resetRes = await sendPasswordResetEmail('seller@test.com');
-  assert.strictEqual(resetRes.success, false, "sendPasswordResetEmail must fail when backend unconfigured");
-  assert.strictEqual(resetRes.notConfigured, true, "Must flag notConfigured as true");
+  // 3. Password reset for unauthorized email must be rejected
+  const unauthorizedReset = await sendPasswordResetEmail('stranger@test.com');
+  assert.strictEqual(unauthorizedReset.success, false, "Password reset for unauthorized email must be rejected");
 
-  const googleOAuthRes = await signInWithGoogleOAuth('seller');
-  assert.strictEqual(googleOAuthRes.success, false, "signInWithGoogleOAuth must fail when backend unconfigured");
-  assert.strictEqual(googleOAuthRes.notConfigured, true, "Must flag notConfigured as true");
+  // 4. Authorized seller without password must prompt for password
+  const noPasswordSignIn = await signInUser({ email: 'sanjeevkumarxcg@gmail.com', password: '' });
+  assert.strictEqual(noPasswordSignIn.success, false);
+  assert.strictEqual(noPasswordSignIn.error, "Please enter your password.");
+
+  // 5. Authorized seller with password calls backend (returns notConfigured in test without env vars)
+  const authorizedSignIn = await signInUser({ email: 'sanjeevkumarxcg@gmail.com', password: 'password123' });
+  assert.strictEqual(authorizedSignIn.success, false);
+  assert.strictEqual(authorizedSignIn.notConfigured, true, "Must flag notConfigured when live backend not configured");
+
+  // 6. Google sign in is disabled in single-seller mode
+  const googleOAuthRes = await signInWithGoogleOAuth();
+  assert.strictEqual(googleOAuthRes.success, false, "Google OAuth must be disabled");
+  assert.ok(googleOAuthRes.error.includes("disabled"), "Google OAuth error must mention disabled");
 }
 await testAuthSafety();
 
@@ -228,16 +241,7 @@ assert.strictEqual(customerData.customer.name, "Verified Buyer", "Must retrieve 
 assert.strictEqual(customerData.deliveries.length, 1, "Must strictly return ONLY the buyer's own deliveries (1 of 2)");
 assert.strictEqual(customerData.deliveries[0].id, "deliv_1", "Delivery ID must match buyer's delivery");
 
-// Test 20: Email-Only Flow (no phone or OTP required)
-const signUpPayload = {
-  name: "New Buyer",
-  email: "buyer@domain.com",
-  password: "securePassword123",
-  role: "customer",
-  customerCode: buyerCode
-};
-assert.strictEqual(typeof signUpPayload.email, 'string');
-assert.strictEqual(typeof signUpPayload.password, 'string');
-assert.strictEqual(signUpPayload.phone, undefined, "Phone number must not be required in email-only account flow");
+// Test 20: Single Authorized Seller Account Configuration
+assert.strictEqual(AUTHORIZED_SELLER_EMAIL, "sanjeevkumarxcg@gmail.com", "Authorized seller email must be sanjeevkumarxcg@gmail.com");
 
-console.log("All 20 calculation, business workflow, and authentication tests passed cleanly!");
+console.log("All 20 calculation, business workflow, and single-seller authentication tests passed cleanly!");

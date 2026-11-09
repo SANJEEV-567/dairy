@@ -57,12 +57,8 @@ export default function Navbar({
                 <span className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
                   {DAIRY_NAME}
                 </span>
-                <span className={`hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border ${
-                  isSeller 
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                    : 'bg-teal-50 text-teal-700 border-teal-200'
-                }`}>
-                  {isSeller ? 'Seller Portal' : 'Customer Portal'}
+                <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                  Authorized Seller
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-medium hidden sm:block">
@@ -123,11 +119,11 @@ export default function Navbar({
                     </div>
                   )}
                   <div className="text-left">
-                    <div className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[120px]">
+                    <div className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[140px]">
                       {currentUser.name}
                     </div>
-                    <div className="text-[10px] text-slate-400 capitalize">
-                      {currentUser.role}
+                    <div className="text-[10px] text-emerald-700 font-semibold">
+                      Authorized Seller
                     </div>
                   </div>
                 </div>
@@ -164,7 +160,7 @@ export default function Navbar({
               <div className="px-4 py-2 bg-slate-50 rounded-xl flex items-center justify-between">
                 <div>
                   <div className="text-sm font-bold text-slate-900">{currentUser.name}</div>
-                  <div className="text-xs text-slate-500 capitalize">{currentUser.role} Account</div>
+                  <div className="text-xs text-emerald-700 font-semibold">Authorized Seller</div>
                 </div>
                 <button
                   onClick={() => {
